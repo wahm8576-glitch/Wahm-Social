@@ -103,6 +103,7 @@ async function run(username: string): Promise<IgSessionResult> {
         /* ignore */
       }
     });
+    console.warn(`[ig-session] @${username} navigating (proxy=${proxy ? "yes" : "no"})`);
     const resp = await page.goto(`https://www.instagram.com/${encodeURIComponent(username)}/`, { waitUntil: "networkidle2", timeout: 40000 }).catch(() => null);
     const finalUrl = page.url();
     if (/accounts\/login|\/challenge\//.test(finalUrl)) {
@@ -120,6 +121,7 @@ async function run(username: string): Promise<IgSessionResult> {
     const posts = mediaItems
       .map((it) => parseV1Media(it, username))
       .filter((p) => (p.media.length || p.cover) && !seen.has(p.id) && (seen.add(p.id), true));
+    console.warn(`[ig-session] @${username} done: profile=${profile ? "yes" : "no"} followers=${profile?.followers ?? "-"} posts=${posts.length} userObjs=${userObjs.length} media=${mediaItems.length}`);
     return { profile: profile ?? undefined, posts, state: profile ? "ok" : "empty", at: Date.now() };
   } finally {
     await browser.close().catch(() => {});
@@ -132,8 +134,14 @@ export async function igSessionLookup(username: string, opts: { force?: boolean 
   const key = username.toLowerCase();
   const hit = store.get(key);
   if (hit && !opts.force && Date.now() - hit.at < TTL) return hit;
-  const r = await browserLock(async () => run(username));
-  if (r === "busy") return hit ?? null;
+  const r = await browserLock(async () => run(username)).catch((e) => {
+    console.warn(`[ig-session] @${username} error: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+    return { posts: [] as Post[], profile: undefined, state: "error" as IgSessionState, at: Date.now() } as IgSessionResult;
+  });
+  if (r === "busy") {
+    console.warn(`[ig-session] @${username} browser busy/cooldown`);
+    return hit ?? null;
+  }
   if (r.state === "checkpoint" || r.state === "logged_out" || r.state === "error") {
     g.__igSessErr = { at: Date.now(), state: r.state };
   } else {
@@ -222,4 +230,26 @@ export async function igSessionConnections(username: string, kind: "followers" |
   if (r.state === "checkpoint" || r.state === "logged_out") g.__igSessErr = { at: Date.now(), state: r.state };
   if (r.items.length) connStore.set(key, { ...r, at: Date.now() });
   return r;
+}
+
+
+/** Snapshot of the current session result for a profile (store only, no browser launch). */
+export function igSessionPeek(username: string): IgSessionResult | "running" | null {
+  const key = username.toLowerCase();
+  const hit = store.get(key);
+  if (hit && Date.now() - hit.at < TTL) return hit;
+  return inflight.has(key) ? "running" : null;
+}
+
+const inflight = new Map<string, Promise<unknown>>();
+
+/** Start a background session run if one isn't cached or already running. Never throws. */
+export function igSessionStart(username: string): void {
+  if (!hasIgSession()) return;
+  const key = username.toLowerCase();
+  const hit = store.get(key);
+  if (hit && Date.now() - hit.at < TTL) return;
+  if (inflight.has(key)) return;
+  const pr = igSessionLookup(username, { force: true }).catch(() => undefined).finally(() => inflight.delete(key));
+  inflight.set(key, pr);
 }

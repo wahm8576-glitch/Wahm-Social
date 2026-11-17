@@ -1,18 +1,13 @@
 import type { Profile } from "@/lib/platforms/types";
 import type { Dict, Locale } from "@/lib/i18n";
-import { compact, date } from "@/lib/format";
+import { date } from "@/lib/format";
 import { Avatar, Badge, PlatformIcon, VerifiedIcon } from "../ui";
 import { ProfileActions } from "./ProfileActions";
 import { AccountLocation } from "./AccountLocation";
 import { LateCountry } from "./LateCountry";
+import { LiveStats } from "./LiveStats";
 
 export function ProfileHeader({ p, t, locale, canPro }: { p: Profile; t: Dict; locale: Locale; canPro: boolean }) {
-  const stats = [
-    { label: t.profile.followers, value: compact(p.followers, locale) },
-    { label: t.profile.following, value: compact(p.following, locale) },
-    ...(p.likes !== undefined ? [{ label: t.profile.likes, value: compact(p.likes, locale) }] : []),
-    { label: t.profile.posts, value: compact(p.postsCount, locale) },
-  ];
   return (
     <section className="card relative overflow-hidden p-6 sm:p-8">
       <div className="pointer-events-none absolute -top-24 end-0 h-64 w-64 rounded-full bg-accent-500/10 blur-3xl" />
@@ -54,14 +49,14 @@ export function ProfileHeader({ p, t, locale, canPro }: { p: Profile; t: Dict; l
         </div>
         <ProfileActions platform={p.platform} username={p.username} canPro={canPro} />
       </div>
-      <div className="relative mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-line bg-glass px-4 py-3 text-center">
-            <div className="text-xl font-black text-ink">{s.value}</div>
-            <div className="text-xs text-ink-3">{s.label}</div>
-          </div>
-        ))}
-      </div>
+      <LiveStats
+        platform={p.platform}
+        username={p.username}
+        init={{ followers: p.followers, following: p.following, likes: p.likes, postsCount: p.postsCount }}
+        preview={!!p.preview}
+        locale={locale}
+        labels={{ followers: t.profile.followers, following: t.profile.following, likes: t.profile.likes, posts: t.profile.posts }}
+      />
     </section>
   );
 }
