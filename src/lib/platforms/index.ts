@@ -5,7 +5,7 @@ import { DISABLED_MSG, featureOn, requireFeatureOn } from "../site/flags";
  * Adds caching, demo fallback, and source labelling on top of raw adapters.
  */
 import { env } from "../env";
-import { cached, TTL } from "../server/cache";
+import { cache, cached, TTL } from "../server/cache";
 import { instagram } from "./instagram/adapter";
 import { tiktok } from "./tiktok/adapter";
 import { demoPosts, demoProfile, demoStories } from "./demo";
@@ -79,10 +79,30 @@ export async function getPosts(platform: Platform, username: string, limit = 12)
     TTL.posts,
     async () => {
       const posts = await adapters[platform].getPosts(username, { limit });
-      return platform === "tiktok" ? tiktok.enrich(posts, Math.min(limit, 12)) : posts;
+      if (platform !== "tiktok") return posts;
+      const enriched = await tiktok.enrich(posts, Math.min(limit, 12));
+      await repairTikTokCountry(username, enriched).catch(() => undefined);
+      return enriched;
     },
     () => demoPosts(platform, username, limit),
   );
+}
+
+/**
+ * The posts tab reads each video page (with locationCreated). If the profile was cached without a
+ * country (its own sampling timed out / was blocked), fill it in from these posts so the next view shows it.
+ */
+async function repairTikTokCountry(username: string, posts: Post[]) {
+  if (!featureOn("region") || !posts.some((p) => p.location?.country)) return;
+  const { locationFromPosts } = await import("./tiktok/region");
+  for (const key of [`profile:tiktok:${username}:v3`, `stale:profile:tiktok:${username}:v3`]) {
+    const prof = cache.get<Profile>(key);
+    if (!prof || prof.location?.current || prof.isPrivate) continue;
+    const loc = locationFromPosts(posts, prof.language ?? prof.location?.language);
+    if (!loc) continue;
+    cache.set(key, { ...prof, location: loc }, key.startsWith("stale:") ? TTL.stale : TTL.profile);
+    cache.set(`tt-loc:${username.toLowerCase()}`, loc, TTL.profile);
+  }
 }
 
 export async function getPost(platform: Platform, ref: string, username?: string): Promise<Sourced<Post>> {

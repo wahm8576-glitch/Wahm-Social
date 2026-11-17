@@ -7,12 +7,12 @@ import "server-only";
  * 4. Per-video locationCreated — last resort when region is absent (and the account has posts)
  * Region lookups and video sampling run in parallel so we never lose the video fallback to timeouts.
  */
-import type { Profile, ProfileLocation } from "../types";
+import type { Post, Profile, ProfileLocation } from "../types";
 import { httpGet } from "../../server/http";
 import { cookieValue, hasTikTokSession, tiktokWebHeaders } from "./session";
 import { accountLocation } from "./location";
 import { rememberedRegion } from "./followers/web";
-import { voteCountry } from "./location-summary";
+import { summarizeLocation, voteCountry } from "./location-summary";
 import { cache } from "../../server/cache";
 import { siteNow } from "../../site/snapshot";
 
@@ -90,26 +90,55 @@ async function detailRegion(username: string, secUid?: string): Promise<string |
 
 const LOC_HIT_TTL = () => Math.max(5, siteNow().limits?.regionCacheMin ?? 360) * 60_000;
 const LOC_MISS_TTL = 20 * 60_000;
+/** Accounts that DO have posts but we could not read a country yet (timeouts / blocks): retry soon. */
+const LOC_MISS_TTL_WITH_POSTS = 3 * 60_000;
 
-export async function resolveLocation(profile: Profile, itemIds: string[] = []): Promise<ProfileLocation | undefined> {
+/** Posts already cached by the posts tab (each carries its video's locationCreated). */
+function cachedPosts(username: string): Post[] {
+  const u = username.toLowerCase();
+  const out: Post[] = [];
+  for (const k of [`posts:tiktok:${username}:12`, `posts:tiktok:${u}:12`, `stale:posts:tiktok:${username}:12`, `stale:posts:tiktok:${u}:12`]) {
+    const v = cache.get<Post[]>(k);
+    if (Array.isArray(v)) out.push(...v);
+  }
+  return out;
+}
+
+export async function resolveLocation(profile: Profile, itemIds: string[] = [], seedPosts: Post[] = []): Promise<ProfileLocation | undefined> {
   const key = `tt-loc:${profile.username.toLowerCase()}`;
   const hit = cache.get<ProfileLocation | null>(key);
-  if (hit !== undefined) return hit ?? (profile.language ? { recent: [], sample: 0, language: profile.language } : undefined);
-  const loc = await computeLocation(profile, itemIds);
-  cache.set(key, loc?.current ? loc : null, loc?.current ? LOC_HIT_TTL() : LOC_MISS_TTL);
+  if (hit) return hit;
+  const seed = [...seedPosts, ...cachedPosts(profile.username)];
+  // A cached miss is only trusted when there is still nothing new to learn from.
+  if (hit === null && !seed.some((p) => p.location?.country)) {
+    return profile.language ? { recent: [], sample: 0, language: profile.language } : undefined;
+  }
+  const loc = await computeLocation(profile, itemIds, seed);
+  const hasPosts = (profile.postsCount ?? 1) > 0 || itemIds.length > 0;
+  cache.set(key, loc?.current ? loc : null, loc?.current ? LOC_HIT_TTL() : hasPosts ? LOC_MISS_TTL_WITH_POSTS : LOC_MISS_TTL);
   return loc;
 }
 
-async function computeLocation(profile: Profile, itemIds: string[]): Promise<ProfileLocation | undefined> {
+/** Country from posts we already hold (no network). Used to repair a profile that was cached without one. */
+export function locationFromPosts(posts: Post[], language?: string): ProfileLocation | undefined {
+  const loc = summarizeLocation(posts.filter((p) => p?.location?.country), language);
+  return loc?.current ? { ...loc, source: "video", via: "tiktok" } : undefined;
+}
+
+async function computeLocation(profile: Profile, itemIds: string[], seed: Post[] = []): Promise<ProfileLocation | undefined> {
   // Run region enrichment and video sampling together so video country isn't lost to timeouts.
-  const hasPosts = (profile.postsCount ?? 0) > 0 || itemIds.length > 0;
+  // postsCount missing (thin/fallback profile) ≠ zero posts: still sample.
+  const hasPosts = (profile.postsCount ?? 1) > 0 || itemIds.length > 0 || seed.length > 0;
+  // Keep every post read so far: on timeout we vote with what we have instead of dropping it all.
+  const partial = new Map<string, Post>();
+  const keep = (p: Post) => p?.id && p.location?.country && partial.set(p.id, p);
   const videoPromise =
     profile.isPrivate || !hasPosts
       ? Promise.resolve(undefined)
       : Promise.race([
-          accountLocation(profile.username, profile.language, 12, itemIds).catch(() => undefined),
+          accountLocation(profile.username, profile.language, 12, itemIds, 14_000, seed, keep).catch(() => undefined),
           new Promise<undefined>((r) => setTimeout(() => r(undefined), 18000)),
-        ]);
+        ]).then((v) => (v?.current ? v : summarizeLocation([...partial.values()], profile.language) ?? v));
 
   const regionPromise = (async () => {
     let region = profile.region ?? rememberedRegion(profile.username);
@@ -171,7 +200,7 @@ async function fallbackVideoRegion(
   const { countikVideoIds } = await import("./countik");
   const { tikwmVideo } = await import("./tikwm");
   const fromCountik = profile.secUid ? await countikVideoIds(profile.secUid).catch(() => [] as string[]) : [];
-  const ids = [...new Set([...itemIds, ...fromCountik])].filter((x) => /^\d{18,21}$/.test(x)).slice(0, 3);
+  const ids = [...new Set([...itemIds, ...fromCountik])].filter((x) => /^\d{18,21}$/.test(x)).slice(0, 5);
   if (!ids.length) return undefined;
   const codes = await Promise.all(
     ids.map((id) =>

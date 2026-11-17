@@ -1,4 +1,5 @@
 import "server-only";
+import { probeInstagram } from "../pools/probe";
 import { DESKTOP_UA, looksLikeBotWall, proxiedFetch, proxyList } from "../server/http";
 import { thirdPartyBlocked } from "../platforms/tiktok/fallback-http";
 import { readRelayUrl, rewriteViaRelay, validateRelayUrl } from "../server/relay";
@@ -62,6 +63,10 @@ async function runOneProxyTest(using: string, typed: boolean): Promise<string> {
       clearTimeout(timer);
     }
   }
+  // Instagram too: every Instagram request goes through these proxies.
+  const ig = await probeInstagram(f);
+  const icon = ig.verdict === "ok" ? "✅ يشتغل" : ig.verdict === "blocked" ? "⛔ مرفوض" : ig.verdict === "error" ? "❌" : "⚠️";
+  lines.push(`• instagram.com: ${ig.status ? `HTTP ${ig.status} ` : ""}${icon}${ig.note ? ` — ${ig.note}` : ""}${ig.ms ? ` (${(ig.ms / 1000).toFixed(1)}s)` : ""}`);
   return lines.join("\n");
 }
 

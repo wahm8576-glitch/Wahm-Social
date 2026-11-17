@@ -3,7 +3,7 @@
  * realistic browser headers and structured errors.
  */
 import { PlatformError } from "../platforms/types";
-import { failoverRelay, recordRelayTry, relayList, rewriteViaRelay, shouldRelay } from "./relay";
+import { activeRelayIndex, failoverRelay, recordRelayTry, relayList, rewriteViaRelay, shouldRelay } from "./relay";
 import { logError } from "./errorLog";
 
 export const DESKTOP_UA =
@@ -32,7 +32,92 @@ export interface FetchResult {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** instagram.com and its CDNs (cdninstagram / fbcdn): never contacted directly when a proxy exists. */
+export function isInstagramHost(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h === "instagram.com" || h.endsWith(".instagram.com") || h.endsWith(".cdninstagram.com") || h.endsWith(".fbcdn.net");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every Instagram request goes through the proxy list (SCRAPER_PROXY / admin "البروكسيات"), in order,
+ * moving to the next proxy on connection errors, 407 and 429. If every proxy is refused and the request
+ * is a public GET without cookies, the Cloudflare Worker list (RELAY_URL) is tried as the last fallback.
+ * A direct request from the server IP happens only when no proxy and no Worker is configured at all.
+ */
+async function instagramGet(url: string, opts: FetchOptions): Promise<FetchResult> {
+  const failoverOn = [...new Set([...(opts.failoverOn ?? []), 429])];
+  const hasProxy = proxyList().length > 0;
+  const relayable = relayList().length > 0 && canRelayRequest(opts);
+  if (!hasProxy && !relayable) return baseGet(url, { ...opts, proxy: false });
+  let viaProxy: FetchResult | undefined;
+  let proxyErr: unknown;
+  if (hasProxy) {
+    try {
+      viaProxy = await baseGet(url, { ...opts, proxy: true, failoverOn });
+      if (!igRefused(viaProxy)) return viaProxy;
+    } catch (e) {
+      proxyErr = e;
+    }
+  }
+  if (relayable) {
+    const viaRelay = await relayGet(url, opts).catch(() => undefined);
+    if (viaRelay && (!igRefused(viaRelay) || !viaProxy)) return viaRelay;
+  }
+  if (viaProxy) return viaProxy;
+  throw proxyErr ?? new PlatformError("upstream_error", "Instagram request failed via every proxy and Worker", 502);
+}
+
+/** Instagram said no: rate limit, or bounced to the login / challenge page. */
+function igRefused(r: FetchResult): boolean {
+  return r.status === 429 || r.status === 401 || /\/accounts\/login|\/challenge\//.test(r.url);
+}
+
+function canRelayRequest(opts: FetchOptions): boolean {
+  if ((opts.method ?? "GET").toUpperCase() !== "GET" || opts.body) return false;
+  return !Object.entries(opts.headers ?? {}).some(([k, v]) => k.toLowerCase() === "cookie" && !!v);
+}
+
+/** One try per Worker, in order. A Worker that does not allow the host answers 403 "blocked host". */
+async function relayGet(url: string, opts: FetchOptions): Promise<FetchResult | undefined> {
+  const list = relayList();
+  for (let i = 0; i < list.length; i++) {
+    const base = list[(activeRelayIndex() + i) % list.length];
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12000);
+    try {
+      const res = await fetch(rewriteViaRelay(url, base), {
+        headers: { "user-agent": DESKTOP_UA, "accept-language": "en-US,en;q=0.9,ar;q=0.8", ...opts.headers },
+        signal: ctrl.signal,
+        cache: "no-store",
+      } as RequestInit);
+      const text = await res.text();
+      recordRelayTry(url, res.status, res.status < 400);
+      if (res.status === 403 && /blocked host/i.test(text.slice(0, 60))) {
+        logError("relay", `Worker does not allow ${hostOf(url)} (add it to the Worker allowlist)`);
+        continue;
+      }
+      if (res.status >= 500) continue;
+      return { status: res.status, text, headers: res.headers, url };
+    } catch (e) {
+      recordRelayTry(url, undefined, false);
+      logError("relay", `Worker request failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  return undefined;
+}
+
 export async function httpGet(url: string, opts: FetchOptions = {}): Promise<FetchResult> {
+  if (isInstagramHost(url)) return instagramGet(url, opts);
+  return baseGet(url, opts);
+}
+
+async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResult> {
   const { timeoutMs = 12000 } = opts;
   // One extra attempt per spare proxy / spare Worker so a dead one fails over within the same call.
   const spare = opts.proxy ? Math.max(0, proxyList().length - 1) : 0;
@@ -199,4 +284,29 @@ export async function proxiedFetch(override?: string): Promise<typeof fetch | nu
   if (proxyFetchCache.size > 8) proxyFetchCache.clear();
   proxyFetchCache.set(url, fn);
   return fn;
+}
+
+/**
+ * Streaming fetch (images / video) through the proxy list with failover, for Instagram CDNs.
+ * Returns null when no proxy is configured or every proxy failed, so the caller can decide what to do.
+ */
+export async function proxiedStream(url: string, init: RequestInit): Promise<Response | null> {
+  const list = proxyList();
+  for (let i = 0; i < list.length; i++) {
+    const f = await proxiedFetch();
+    if (!f) return null;
+    try {
+      const res = await f(url, init);
+      if ((res.status === 407 || res.status === 429) && i < list.length - 1) {
+        await res.body?.cancel().catch(() => undefined);
+        failoverProxy();
+        continue;
+      }
+      return res;
+    } catch (e) {
+      logError("proxy", `Proxy media fetch failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
+      if (!failoverProxy()) return null;
+    }
+  }
+  return null;
 }

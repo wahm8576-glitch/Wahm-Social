@@ -67,9 +67,12 @@ export const tiktok: PlatformAdapter & {
     let profile: Profile | undefined;
     let primaryErr: unknown;
     let itemIds: string[] = [];
+    let seedPosts: Post[] = [];
     try {
       const { status, profile: p, items } = await fetchProfilePage(username);
       itemIds = items.map((it) => it.id);
+      // SSR itemList entries already carry locationCreated — use them directly for the country.
+      seedPosts = items;
       if (status === 10221 || status === 10202 || status === 404 || !p) {
         primaryErr = new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
       } else {
@@ -112,7 +115,7 @@ export const tiktok: PlatformAdapter & {
       profile.location = profile.language ? { recent: [], sample: 0, language: profile.language } : undefined;
       return profile;
     }
-    profile.location = await import("./region").then((m) => m.resolveLocation(profile!, itemIds)).catch(() =>
+    profile.location = await import("./region").then((m) => m.resolveLocation(profile!, itemIds, seedPosts)).catch(() =>
       profile!.language ? { recent: [], sample: 0, language: profile!.language } : undefined,
     );
     return profile;

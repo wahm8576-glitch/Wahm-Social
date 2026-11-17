@@ -2,7 +2,7 @@
  * Media proxy helpers. Only whitelisted platform CDNs may be proxied, which
  * prevents this server from being abused as an open proxy (SSRF).
  */
-import { DESKTOP_UA } from "./http";
+import { DESKTOP_UA, isInstagramHost, proxiedStream, proxyList } from "./http";
 import { PlatformError } from "../platforms/types";
 
 const ALLOWED_HOST_SUFFIXES = [
@@ -43,7 +43,11 @@ export async function fetchMedia(url: string, opts: { cookie?: string; range?: s
   const headers: Record<string, string> = { "user-agent": DESKTOP_UA, referer: refererFor(url), accept: "*/*" };
   if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.range) headers.range = opts.range;
-  const res = await fetch(url, { headers, redirect: "follow", cache: "no-store" });
+  const init = { headers, redirect: "follow", cache: "no-store" } as RequestInit;
+  // Instagram CDN media also goes through the proxy list (set IG_MEDIA_VIA_PROXY=0 to save proxy bandwidth).
+  // Direct only as a last resort when every proxy failed to connect, so images never just break.
+  const viaProxy = isInstagramHost(url) && process.env.IG_MEDIA_VIA_PROXY !== "0" && proxyList().length > 0;
+  const res = (viaProxy ? await proxiedStream(url, init) : null) ?? (await fetch(url, init));
   if (!res.ok && res.status !== 206) throw new PlatformError("upstream_error", `Media fetch failed (${res.status})`, 502);
   return res;
 }
