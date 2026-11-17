@@ -211,6 +211,8 @@ async function browserListInner(
     // 1) Click the Followers/Following control first — TikTok UI issues a fully signed list request.
     {
       const sel = kind === "followers" ? '[data-e2e="followers-count"]' : '[data-e2e="following-count"]';
+      // The count control only exists after TikTok's app hydrates (slow on a small CPU) — wait for it.
+      await page.waitForSelector(sel, { timeout: 20000 }).catch(() => undefined);
       const clicked = await page.evaluate((s: string, kind: "followers" | "following") => {
         const el = document.querySelector(s) as HTMLElement | null;
         if (el) { el.click(); return "e2e"; }
