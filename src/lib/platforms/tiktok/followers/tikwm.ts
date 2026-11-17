@@ -6,6 +6,7 @@ import "server-only";
  * Tries the server's own IP first, then the proxy pool.
  */
 import { httpGet } from "../../../server/http";
+import { logError } from "../../../server/errorLog";
 import type { Connection, ConnectionAttempt } from "../../types";
 
 const BASE = "https://www.tikwm.com/api/user";
@@ -29,7 +30,13 @@ export async function tikwmList(userId: string, kind: "followers" | "following")
   if ((unavailableUntil[kind] ?? 0) > Date.now()) return fail("tikwm_unavailable");
   const url = `${BASE}/${kind}?user_id=${userId}&count=50&cursor=0`;
   let last = "tikwm_error";
-  for (const proxy of [false, true]) {
+  // Free tier allows ~1 request/second per IP: on that message wait and retry once on the same route.
+  const routes = [false, false, true, true];
+  for (let i = 0; i < routes.length; i++) {
+    const proxy = routes[i];
+    // The repeat slot on a route is only for a rate-limit retry.
+    if (i % 2 === 1 && last !== "tikwm_quota") continue;
+    last = "tikwm_error";
     try {
       const res = await httpGet(url, { proxy, retries: 0, timeoutMs: 9000, headers: { accept: "application/json", referer: "https://www.tikwm.com/" } });
       const t = res.text.trim();
@@ -47,6 +54,8 @@ export async function tikwmList(userId: string, kind: "followers" | "following")
         if (/hiding|private/i.test(msg)) return fail("hidden_by_user");
         if (/limit|quota|free api/i.test(msg)) {
           last = "tikwm_quota";
+          logError("tikwm", `${kind} list (${proxy ? "proxy" : "direct"}): ${msg.slice(0, 80)}`);
+          await new Promise((r) => setTimeout(r, 1200));
           continue;
         }
         return fail(msg.slice(0, 40) || "tikwm_error");
