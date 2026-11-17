@@ -62,3 +62,34 @@ export function parseV1Media(it: Any, author: string): Post {
     url: `https://www.instagram.com/p/${code}/`,
   };
 }
+
+/** Parse a post node from the web_profile_info graphql shape (edge_owner_to_timeline_media). */
+export function parseGraphMedia(n: Any, author: string): Post {
+  const caption: string = n.edge_media_to_caption?.edges?.[0]?.node?.text ?? "";
+  const kids: Any[] = n.edge_sidecar_to_children?.edges?.map((e: Any) => e.node) ?? [];
+  const nodes = kids.length ? kids : [n];
+  const media = nodes.map((c) =>
+    c.is_video
+      ? { type: "video" as const, url: c.video_url ?? "", thumbnail: c.display_url ?? c.thumbnail_src ?? "" }
+      : { type: "image" as const, url: c.display_url ?? c.thumbnail_src ?? "" },
+  );
+  const code = n.shortcode ?? String(n.id);
+  return {
+    platform: "instagram",
+    id: String(n.id ?? n.shortcode),
+    shortcode: n.shortcode,
+    author,
+    caption,
+    type: kids.length > 1 ? "carousel" : n.is_video ? "video" : "image",
+    cover: n.display_url ?? n.thumbnail_src ?? "",
+    media: media.filter((m) => m.url || true),
+    createdAt: n.taken_at_timestamp,
+    stats: {
+      views: n.video_view_count ?? n.video_play_count,
+      likes: n.edge_liked_by?.count ?? n.edge_media_preview_like?.count,
+      comments: n.edge_media_to_comment?.count,
+    },
+    hashtags: extractHashtags(caption),
+    url: `https://www.instagram.com/p/${code}/`,
+  };
+}

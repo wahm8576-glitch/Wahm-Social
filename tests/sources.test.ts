@@ -94,3 +94,27 @@ test("free TikTok parsers: story API items and SaveTik download tokens", async (
   assert.deepEqual(parseSaveTik(html), { play: "https://v19.tiktokcdn-us.com/a.mp4", hd: "https://v16.tokcdn.com/1_original.mp4", music: "https://v16-ies-music.tiktokcdn-us.com/m.mp3", title: "Hello" });
   assert.equal(parseSaveTik("<div>nothing</div>"), null);
 });
+
+test("parseGraphMedia maps web_profile_info timeline node", async () => {
+  const { parseGraphMedia } = await import("../src/lib/platforms/instagram/session/v1");
+  const node = {
+    id: "123",
+    shortcode: "ABC",
+    display_url: "https://scontent.cdninstagram.com/x.jpg",
+    is_video: true,
+    video_url: "https://scontent.cdninstagram.com/v.mp4",
+    video_view_count: 999,
+    taken_at_timestamp: 1700000000,
+    edge_media_to_caption: { edges: [{ node: { text: "hi #ig" } }] },
+    edge_media_preview_like: { count: 42 },
+    edge_media_to_comment: { count: 7 },
+  };
+  const p = parseGraphMedia(node, "someone");
+  assert.equal(p.shortcode, "ABC");
+  assert.equal(p.type, "video");
+  assert.equal(p.stats.likes, 42);
+  assert.equal(p.stats.comments, 7);
+  assert.equal(p.stats.views, 999);
+  assert.ok(p.url.includes("/p/ABC/"));
+  assert.ok(p.hashtags.includes("ig"));
+});

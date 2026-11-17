@@ -44,5 +44,5 @@ export const GET = handler(async (req: Request, { params }: { params: { username
 
 function counts(p?: Profile | null) {
   if (!p) return undefined;
-  return { followers: p.followers, following: p.following, postsCount: p.postsCount, likes: p.likes, preview: p.preview };
+  return { followers: p.followers, following: p.following, postsCount: p.postsCount, likes: p.likes, preview: false };
 }

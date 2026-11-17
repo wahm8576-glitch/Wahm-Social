@@ -8,7 +8,7 @@ import "server-only";
  * runs at a time (shared lock with the TikTok follower browser). Checkpoints/logouts are detected.
  */
 import type { Connection, Post, Profile } from "../../types";
-import { parseV1Media, parseV1User } from "./v1";
+import { parseGraphMedia, parseV1Media, parseV1User } from "./v1";
 import { igSessionCookies, hasIgSession } from "./cookies";
 import { proxyForBrowser } from "../../../server/http";
 import { browserLock } from "../../tiktok/followers/lock";
@@ -78,6 +78,7 @@ async function run(username: string): Promise<IgSessionResult> {
   const browser = await launch(proxy?.server);
   const userObjs: Any[] = [];
   const mediaItems: Any[] = [];
+  const graphItems: Any[] = [];
   try {
     const page = await browser.newPage();
     if (proxy?.username) await page.authenticate({ username: proxy.username, password: proxy.password ?? "" });
@@ -99,6 +100,7 @@ async function run(username: string): Promise<IgSessionResult> {
         const json = JSON.parse(txt);
         for (const user of deepCollect(json, (v) => v && typeof v === "object" && typeof v.username === "string" && ("follower_count" in v || "edge_followed_by" in v))) userObjs.push(user);
         for (const it of deepCollect(json, (v) => v && typeof v === "object" && (v.media_type !== undefined) && (v.code || v.pk) && v.image_versions2)) mediaItems.push(it);
+        for (const n of deepCollect(json, (v) => v && typeof v === "object" && typeof v.shortcode === "string" && (v.display_url || v.thumbnail_src) && v.edge_media_to_caption !== undefined)) graphItems.push(n);
       } catch {
         /* ignore */
       }
@@ -118,10 +120,11 @@ async function run(username: string): Promise<IgSessionResult> {
     const best = userObjs.find((u) => String(u.username).toLowerCase() === username.toLowerCase()) ?? userObjs[0];
     const profile = best ? parseV1User({ ...best, following_count: best.following_count ?? best.edge_follow?.count, follower_count: best.follower_count ?? best.edge_followed_by?.count, media_count: best.media_count ?? best.edge_owner_to_timeline_media?.count }) : undefined;
     const seen = new Set<string>();
-    const posts = mediaItems
-      .map((it) => parseV1Media(it, username))
-      .filter((p) => (p.media.length || p.cover) && !seen.has(p.id) && (seen.add(p.id), true));
-    console.warn(`[ig-session] @${username} done: profile=${profile ? "yes" : "no"} followers=${profile?.followers ?? "-"} posts=${posts.length} userObjs=${userObjs.length} media=${mediaItems.length}`);
+    const posts = [
+      ...mediaItems.map((it) => parseV1Media(it, username)),
+      ...graphItems.map((n) => parseGraphMedia(n, username)),
+    ].filter((p) => (p.media.length || p.cover) && !seen.has(p.id) && (seen.add(p.id), true));
+    console.warn(`[ig-session] @${username} done: profile=${profile ? "yes" : "no"} followers=${profile?.followers ?? "-"} posts=${posts.length} userObjs=${userObjs.length} media=${mediaItems.length} graph=${graphItems.length}`);
     return { profile: profile ?? undefined, posts, state: profile ? "ok" : "empty", at: Date.now() };
   } finally {
     await browser.close().catch(() => {});
