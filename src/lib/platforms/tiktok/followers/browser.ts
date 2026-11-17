@@ -6,6 +6,7 @@ import "server-only";
 import type { Connection } from "../../types";
 import { cookieValue, cookiesForBrowser, hasTikTokSession, CHROME_UA } from "../session";
 import { proxyForBrowser } from "../../../server/http";
+import { browserLock } from "./lock";
 
 export type BrowserListResult = {
   items: Connection[];
@@ -65,29 +66,14 @@ function parseList(j: { userList?: { user?: Record<string, unknown> }[] }): Conn
  * Chromium is heavy on the free 512 MB instance: while it runs, every other page waits.
  * Only one browser at a time, and after a failed run wait a few minutes before launching again.
  */
-const bg = globalThis as unknown as { __frostlyBrowserBusy?: boolean; __frostlyBrowserFailAt?: number };
-const BROWSER_RETRY_AFTER_FAIL_MS = 5 * 60_000;
-
 export async function browserList(
   username: string,
   kind: "followers" | "following",
   secUidHint = "",
 ): Promise<BrowserListResult> {
-  if (bg.__frostlyBrowserBusy) return { items: [], note: "browser_busy" };
-  if (bg.__frostlyBrowserFailAt && Date.now() - bg.__frostlyBrowserFailAt < BROWSER_RETRY_AFTER_FAIL_MS) {
-    return { items: [], note: "browser_cooldown" };
-  }
-  bg.__frostlyBrowserBusy = true;
-  try {
-    const r = await browserListInner(username, kind, secUidHint);
-    bg.__frostlyBrowserFailAt = r.items.length ? undefined : Date.now();
-    return r;
-  } catch (e) {
-    bg.__frostlyBrowserFailAt = Date.now();
-    throw e;
-  } finally {
-    bg.__frostlyBrowserBusy = false;
-  }
+  // Shared single-browser lock with the Instagram session (512 MB can run only one Chromium).
+  const r = await browserLock(() => browserListInner(username, kind, secUidHint));
+  return r === "busy" ? { items: [], note: "browser_busy" } : r;
 }
 
 async function browserListInner(
