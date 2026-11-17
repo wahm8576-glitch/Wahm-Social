@@ -3,6 +3,7 @@ import { PanelShell, type Flashy } from "@/components/admin/PanelShell";
 import { FormSection, Section } from "@/components/admin/Section";
 import { Area, Text, Submit } from "@/components/admin/Fields";
 import { firebaseStatus } from "@/lib/firebase/config";
+import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,9 @@ export default async function FirebasePage({ searchParams }: { searchParams: Fla
           <li>إعدادات الويب: {st.webComplete ? `✅ ${w.projectId}` : "❌ ناقصة"}</li>
           <li>
             حساب الخدمة: {st.sa ? `✅ ${st.sa.clientEmail} (${st.sa.source === "env" ? "من Render" : "من اللوحة"})` : st.saStoredButInvalid ? "❌ محفوظ لكنه غير صالح" : "❌ غير محفوظ"}
+          </li>
+          <li>
+            مدراء الموقع (ADMIN_EMAILS): {env.adminEmails.length ? <span dir="ltr">{env.adminEmails.join(", ")}</span> : "❌ لا يوجد"} — صلاحية المدير تُعطى فقط لهذه الإيميلات بعد توثيقها (Google أو رابط التوثيق).
           </li>
           {st.projectMismatch && <li className="text-rose-500">❌ projectId في الويب لا يطابق حساب الخدمة</li>}
         </ul>

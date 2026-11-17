@@ -3,8 +3,7 @@ import { getSettings } from "@/lib/site/store";
 import { firebaseEnabled } from "@/lib/firebase/config";
 import { z } from "zod";
 import { Users } from "@/lib/server/db";
-import { hashPassword, publicUser, sessionCookie, signSession } from "@/lib/server/auth";
-import { env } from "@/lib/env";
+import { hashPassword, publicUser, roleFor, sessionCookie, signSession } from "@/lib/server/auth";
 import { burstGuard } from "@/lib/server/guard";
 import { handler } from "@/lib/server/respond";
 import { PlatformError } from "@/lib/platforms/types";
@@ -28,7 +27,7 @@ export const POST = handler(async (req: Request) => {
     name: name ?? email.split("@")[0],
     passwordHash: await hashPassword(password),
     plan: "free",
-    role: env.adminEmails.includes(email.toLowerCase()) || Users.all().length === 0 ? "admin" : "user",
+    role: roleFor({ email }),
   });
   const res = NextResponse.json({ ok: true, data: publicUser(user) });
   res.cookies.set(sessionCookie(await signSession(user.id)));

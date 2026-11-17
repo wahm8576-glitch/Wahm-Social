@@ -1,4 +1,5 @@
 import "server-only";
+import { roleFor } from "./roles";
 /**
  * JWT session auth (HS256 via `jose`) stored in an httpOnly cookie.
  * Works in route handlers and server components.
@@ -23,6 +24,7 @@ export interface SessionUser {
   role: User["role"];
 }
 
+export { roleFor };
 export const publicUser = (u: User): SessionUser => ({ id: u.id, email: u.email, name: u.name, plan: u.plan, role: u.role });
 
 export async function hashPassword(pw: string) {
@@ -63,6 +65,11 @@ export function sessionCookie(token: string) {
   };
 }
 
+function syncRole(u: User): User {
+  const role = roleFor(u);
+  return role === u.role ? u : Users.update(u.id, { role }) ?? { ...u, role };
+}
+
 /** Resolve the current user (server components & route handlers). */
 export async function currentUser(): Promise<User | null> {
   const token = cookies().get(SESSION_COOKIE)?.value;
@@ -73,8 +80,7 @@ export async function currentUser(): Promise<User | null> {
   if (u.plan !== "free" && u.planRenewsAt && u.planRenewsAt < Date.now()) {
     return Users.update(u.id, { plan: "free" }) ?? u;
   }
-  if (env.adminEmails.includes(u.email) && u.role !== "admin") return Users.update(u.id, { role: "admin" }) ?? u;
-  return u;
+  return syncRole(u);
 }
 
 /** Resolve user from cookie OR `x-api-key` header (Business plan API access). */
@@ -82,7 +88,7 @@ export async function userFromRequest(req: Request): Promise<User | null> {
   const apiKey = req.headers.get("x-api-key");
   if (apiKey) {
     const u = Users.byApiKey(apiKey);
-    if (u && hasFeature(u.plan, "api_access")) return u;
+    if (u && hasFeature(u.plan, "api_access")) return syncRole(u);
   }
   return currentUser();
 }

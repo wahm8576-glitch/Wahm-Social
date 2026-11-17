@@ -21,6 +21,8 @@ export interface User {
   plan: PlanId;
   planRenewsAt?: number;
   role: "user" | "admin";
+  /** Set from the Firebase ID token on each login (Google accounts are verified by Google). */
+  emailVerified?: boolean;
   createdAt: number;
   lastLoginAt?: number;
   apiKey?: string;

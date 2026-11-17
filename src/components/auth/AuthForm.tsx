@@ -57,6 +57,7 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
         if (form.password.length < 8) throw Object.assign(new Error(), { code: "auth/weak-password" });
         cred = await fa.createUserWithEmailAndPassword(auth, email, form.password);
         if (form.name) await fa.updateProfile(cred.user, { displayName: form.name }).catch(() => {});
+        await fa.sendEmailVerification(cred.user, { url: `${location.origin}/login` }).catch(() => {});
       } else {
         try {
           cred = await fa.signInWithEmailAndPassword(auth, email, form.password);

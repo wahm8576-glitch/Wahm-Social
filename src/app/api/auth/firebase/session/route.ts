@@ -26,7 +26,7 @@ export const POST = handler(async (req: Request) => {
   }
   if (!decoded.email) throw new PlatformError("invalid_input", "الحساب ما فيه بريد إلكتروني. This account has no email.", 400);
   // Google accounts are verified by Google; email/password accounts may sign in before verifying (same as before).
-  const user = await userForFirebase(decoded.email, parsed.data.name || (decoded.name as string | undefined));
+  const user = await userForFirebase(decoded.email, parsed.data.name || (decoded.name as string | undefined), decoded.email_verified === true);
   const res = NextResponse.json({ ok: true, data: publicUser(user) });
   res.cookies.set(sessionCookie(await signSession(user.id)));
   return res;
