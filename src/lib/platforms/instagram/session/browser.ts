@@ -141,6 +141,18 @@ export async function igSessionLookup(username: string, opts: { force?: boolean 
   }
   if (r.state === "ok" || r.state === "empty") store.set(key, r);
   if (store.size > 500) store.delete(store.keys().next().value as string);
+  // Upgrade the shared caches with the exact session data (the fast sources may have cached rounded data first).
+  if (r.state === "ok" && r.profile) {
+    const { cache, TTL } = await import("../../../server/cache");
+    const { saveLastGood } = await import("../../../server/lastGood");
+    const pk = `profile:instagram:${username}:v3`;
+    cache.set(pk, r.profile, TTL.profile);
+    cache.set(`stale:${pk}`, r.profile, TTL.stale);
+    saveLastGood(pk, r.profile);
+    if (r.posts.length) {
+      for (const n of [12, 24, 50]) cache.set(`posts:instagram:${username}:${n}`, r.posts.slice(0, n), TTL.posts);
+    }
+  }
   return r;
 }
 
