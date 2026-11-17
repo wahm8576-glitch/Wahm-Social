@@ -18,6 +18,7 @@ import { fetchPreview, PREVIEW_TRIES } from "./preview/fetch";
 import { parseOgPost, parseOgProfile } from "./preview/parse";
 import { parseV1Media, parseV1User, pickSearchUser } from "./session/v1";
 import { dumporProfile, igOembed, profileFromOembed } from "./mirrors";
+import { igSessionLookup } from "./session/browser";
 import { NotFoundHere, runSources, SourceMiss, type Source } from "../../sources/run";
 
 type WebProfile = NonNullable<ReturnType<typeof parseWebProfile>>;
@@ -205,6 +206,13 @@ const remember = (p: Profile) => {
 export function instagramSources(username: string): Source<Profile>[] {
   return [
     {
+      // Logged-in Chromium session: exact counts + posts. Cached 30 min and single-browser, so it
+      // costs nothing on a warm cache and otherwise keeps running in the background to prime the cache.
+      id: "ig-session",
+      timeoutMs: 22000,
+      run: async () => (await igSessionLookup(username))?.profile ?? null,
+    },
+    {
       id: "ig-api",
       timeoutMs: 16000,
       run: async () => {
@@ -258,6 +266,10 @@ export const instagram: PlatformAdapter = {
 
   async getPosts(username, opts): Promise<Post[]> {
     const limit = opts?.limit ?? 12;
+    // Logged-in session (cached) first — the only reliable public post grid from a datacenter IP.
+    const sess = await igSessionLookup(username).catch(() => null);
+    if (sess?.profile?.isPrivate) throw new PlatformError("private_account", "This account is private", 403);
+    if (sess?.posts.length) return sess.posts.slice(0, limit);
     try {
       const { profile, posts } = await webProfile(username);
       if (profile.isPrivate) throw new PlatformError("private_account", "This account is private", 403);

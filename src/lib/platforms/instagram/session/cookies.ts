@@ -57,3 +57,18 @@ export function igHeaders(client: IgClient, referer = "https://www.instagram.com
   }
   return h;
 }
+
+export const hasIgSession = hasSession;
+
+/** IG cookies for a Chromium session (Puppeteer page.setCookie). */
+export function igSessionCookies(): { name: string; value: string; domain: string; path: string }[] {
+  const pairs: [string, string | undefined][] = [
+    ["sessionid", env.igSessionId],
+    ["ds_user_id", dsUserId()],
+    ["csrftoken", env.igCsrfToken],
+    ["mid", env.igMid],
+    ["datr", env.igDatr],
+    ["ig_nrcb", "1"],
+  ];
+  return pairs.filter(([, v]) => v).map(([name, value]) => ({ name, value: value as string, domain: ".instagram.com", path: "/" }));
+}

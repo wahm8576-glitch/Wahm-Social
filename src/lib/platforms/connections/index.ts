@@ -16,6 +16,7 @@ import { researchConnections } from "../tiktok/research/connections";
 import { webList } from "../tiktok/followers/web";
 import { tikwmList } from "../tiktok/followers/tikwm";
 import { igFriendships } from "../instagram/session/friendships";
+import { igSessionConnections } from "../instagram/session/browser";
 import { hasSession } from "../instagram/session/cookies";
 import { lockedResult, listUrl, visibilityOf } from "./visibility";
 import { followersShow } from "./show";
@@ -104,6 +105,18 @@ export async function connectionsFor(profile: Profile, kind: "followers" | "foll
     }
   } else {
     attempts.push({ method: "instagram_session", ok: false, note: hasSession() ? "needs_full_profile" : "not_configured" });
+  }
+  // Logged-in Chromium session (cached 30 min, single browser) when the HTTP friendships path is blocked.
+  if (hasSession()) {
+    try {
+      const [sb] = await cached(`${key}:browser`, TTL, () => igSessionConnections(profile.username, kind));
+      attempts.push({ method: "session", ok: !!sb?.items.length, note: sb?.state ?? "empty" });
+      if (sb?.items.length) {
+        return { available: true, visibility: "public", total, items: sb.items.slice(0, followersShow()), provider: "instagram-session-browser", platformUrl: listUrl(profile, kind), attempts };
+      }
+    } catch {
+      attempts.push({ method: "session", ok: false, note: "browser_error" });
+    }
   }
   return { ...lockedResult(profile, kind, "login_only"), attempts };
 }
