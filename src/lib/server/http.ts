@@ -93,7 +93,7 @@ export async function chainGet(url: string, opts: FetchOptions, refused: (r: Fet
     err = err ?? e;
   }
   if (relayList().length && canRelayRequest(opts)) {
-    const r = await relayGet(url, { ...opts, timeoutMs: Math.min(t, 8000) }).catch(() => undefined);
+    const r = await relayGet(url, { ...opts, timeoutMs: Math.min(t, 8000) }, refused).catch(() => undefined);
     if (r && !refused(r)) return { ...r, via: "relay" };
     if (r) last = last ?? { ...r, via: "relay" };
   }
@@ -112,8 +112,13 @@ function canRelayRequest(opts: FetchOptions): boolean {
 }
 
 /** One try per Worker, in order. A Worker that does not allow the host answers 403 "blocked host". */
-async function relayGet(url: string, opts: FetchOptions): Promise<FetchResult | undefined> {
+/**
+ * Try each Worker in RELAY_URL order (comma-separated list). With `refused`, a refused answer
+ * (e.g. Cloudflare challenge / 429 seen by one Worker) moves on to the next Worker; the last refused answer is returned.
+ */
+async function relayGet(url: string, opts: FetchOptions, refused?: (r: FetchResult) => boolean): Promise<FetchResult | undefined> {
   const list = relayList();
+  let lastRefused: FetchResult | undefined;
   for (let i = 0; i < list.length; i++) {
     const base = list[(activeRelayIndex() + i) % list.length];
     const ctrl = new AbortController();
@@ -131,7 +136,12 @@ async function relayGet(url: string, opts: FetchOptions): Promise<FetchResult | 
         continue;
       }
       if (res.status >= 500) continue;
-      return { status: res.status, text, headers: res.headers, url };
+      const out = { status: res.status, text, headers: res.headers, url };
+      if (refused && refused(out)) {
+        lastRefused = out;
+        continue;
+      }
+      return out;
     } catch (e) {
       recordRelayTry(url, undefined, false);
       logError("relay", `Worker request failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
@@ -139,7 +149,7 @@ async function relayGet(url: string, opts: FetchOptions): Promise<FetchResult | 
       clearTimeout(t);
     }
   }
-  return undefined;
+  return lastRefused;
 }
 
 /** Public data hosts that use the proxy → direct → relay chain unless the caller picked a route. */
