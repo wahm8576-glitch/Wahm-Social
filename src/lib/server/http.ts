@@ -52,9 +52,13 @@ export function isInstagramHost(url: string): boolean {
  */
 async function instagramGet(url: string, opts: FetchOptions): Promise<FetchResult> {
   const failoverOn = [...new Set([...(opts.failoverOn ?? []), 429])];
-  const hasProxy = proxyList().length > 0;
+  // Every proxy is cooling down for Instagram (all just answered 429/errors): don't burn more time on them.
+  const hasProxy = proxyList().length > 0 && healthyProxyCount("ig") > 0;
   const relayable = relayList().length > 0 && canRelayRequest(opts);
-  if (!hasProxy && !relayable) return baseGet(url, { ...opts, proxy: false });
+  if (!hasProxy && !relayable) {
+    if (proxyList().length) throw new PlatformError("blocked", "Instagram is rate-limiting every proxy right now", 503);
+    return baseGet(url, { ...opts, proxy: false });
+  }
   let viaProxy: FetchResult | undefined;
   let proxyErr: unknown;
   if (hasProxy) {

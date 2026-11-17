@@ -224,7 +224,7 @@ async function browserListInner(
         return null;
       }, sel, kind);
       console.warn(`[tiktok-followers] browser click=${clicked}`);
-      for (let i = 0; i < 24 && !captureBox.current; i++) await new Promise((r) => setTimeout(r, 500));
+      for (let i = 0; i < 40 && !captureBox.current; i++) await new Promise((r) => setTimeout(r, 500));
     }
 
     // 2) If UI click didn't yield a list, call fetch — prefer TikTok's own byted_acrawler.sign when present.
