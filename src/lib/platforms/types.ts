@@ -114,7 +114,7 @@ export interface Connection {
 }
 
 export interface ConnectionAttempt {
-  method: "official_api" | "web_public" | "mobile_web" | "session" | "instagram_session";
+  method: "official_api" | "web_public" | "mobile_web" | "session" | "third_party" | "instagram_session";
   ok: boolean;
   /** Short machine-readable reason, e.g. "not_approved", "empty_unsigned", "not_configured". */
   note: string;

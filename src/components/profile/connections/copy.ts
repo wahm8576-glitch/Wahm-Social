@@ -29,11 +29,15 @@ export const METHOD_COPY: Record<string, { ar: string; en: string }> = {
   web_public: { ar: "قائمة المتابعين على موقع تيك توك", en: "TikTok website followers list" },
   mobile_web: { ar: "قائمة المتابعين على نسخة الجوال", en: "TikTok mobile-web followers list" },
   session: { ar: "جلسة تيك توك مسجّلة على السيرفر", en: "Signed-in TikTok session on the server" },
+  third_party: { ar: "خدمة عامة بديلة (tikwm)", en: "Public third-party service (tikwm)" },
   instagram_session: { ar: "جلسة انستقرام على السيرفر", en: "Instagram server session" },
 };
 
 export const NOTE_COPY: Record<string, { ar: string; en: string }> = {
   ok: { ar: "نجح", en: "worked" },
+  tikwm_unavailable: { ar: "الخدمة أوقفت هذه القائمة حالياً", en: "the service has disabled this list for now" },
+  tikwm_blocked: { ar: "الخدمة حجبت السيرفر مؤقتاً", en: "the service is blocking the server for now" },
+  tikwm_quota: { ar: "تجاوزنا حد الخدمة اليومي", en: "daily service limit reached" },
   not_configured: { ar: "غير مفعّلة", en: "not configured" },
   not_approved: { ar: "مفاتيح التطبيق غير معتمدة لهذه الواجهة (Login Kit فقط)", en: "app keys aren't approved for it (Login Kit only)" },
   empty_unsigned: { ar: "تيك توك رجّع رد فاضي — يطلب توقيع طلبات خاص بتطبيقه ولا نتجاوزه", en: "TikTok returned an empty reply — it requires its own request signing, which we don't bypass" },

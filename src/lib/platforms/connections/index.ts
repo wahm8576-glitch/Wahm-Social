@@ -14,6 +14,7 @@ import { cache, cached } from "../../server/cache";
 import { PlatformError, type ConnectionAttempt, type ConnectionsResult, type Platform, type Profile } from "../types";
 import { researchConnections } from "../tiktok/research/connections";
 import { webList } from "../tiktok/followers/web";
+import { tikwmList } from "../tiktok/followers/tikwm";
 import { igFriendships } from "../instagram/session/friendships";
 import { hasSession } from "../instagram/session/cookies";
 import { lockedResult, listUrl, visibilityOf } from "./visibility";
@@ -41,6 +42,12 @@ async function tiktokList(profile: Profile, kind: "followers" | "following", cur
     }
   } else {
     attempts.push({ method: "official_api", ok: false, note: "not_configured" });
+  }
+  // Public third-party list (fast, no signing) before the slow session/browser paths.
+  if (!cursor) {
+    const t = await tikwmList(profile.id, kind);
+    attempts.push(t.attempt);
+    if (t.items.length) return { items: t.items, nextCursor: null, provider: "tikwm", attempts };
   }
   // Browser session only needs the username; HTTP paths need secUid.
   {
