@@ -116,3 +116,24 @@ export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>
     throw e;
   }
 }
+
+/**
+ * Stale-while-revalidate: like cached(), but when a stale copy exists and the live call is slow,
+ * answer with the stale copy after `waitMs` and let the live call finish in the background
+ * (it refreshes the cache for the next view). Returns [value, fromCache, isStale].
+ */
+export async function cachedSwr<T>(key: string, ttlMs: number, fn: () => Promise<T>, waitMs = 6000): Promise<[T, boolean, boolean]> {
+  const hit = cache.get<T>(key);
+  if (hit !== undefined) return [hit, true, false];
+  const stale = cache.get<T>(`stale:${key}`);
+  const live = cached(key, ttlMs, fn).then(([v, c]) => [v, c, false] as [T, boolean, boolean]);
+  if (stale === undefined) return live;
+  live.catch(() => undefined);
+  const late = new Promise<[T, boolean, boolean] | null>((r) => setTimeout(() => r(null), waitMs));
+  try {
+    const first = await Promise.race([live, late]);
+    return first ?? [stale, true, true];
+  } catch {
+    return [stale, true, true];
+  }
+}

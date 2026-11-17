@@ -5,7 +5,8 @@ import { DISABLED_MSG, featureOn, requireFeatureOn } from "../site/flags";
  * Adds caching, demo fallback, and source labelling on top of raw adapters.
  */
 import { env } from "../env";
-import { cache, cached, TTL } from "../server/cache";
+import { cache, cached, cachedSwr, TTL } from "../server/cache";
+import { loadLastGood, saveLastGood } from "../server/lastGood";
 import { instagram } from "./instagram/adapter";
 import { tiktok } from "./tiktok/adapter";
 import { demoPosts, demoProfile, demoStories } from "./demo";
@@ -35,7 +36,7 @@ const DEMO_NOTICE =
  * Instagram never silently swaps in demo data when it blocks us (only DEMO_MODE=on shows demo):
  * visitors get an honest "Instagram is blocking the server right now" message instead.
  */
-async function withFallback<T>(key: string, ttl: number, live: () => Promise<T>, demo: () => T, autoDemo = true): Promise<Sourced<T>> {
+async function withFallback<T>(key: string, ttl: number, live: () => Promise<T>, demo: () => T, autoDemo = process.env.DEMO_AUTO === "1"): Promise<Sourced<T>> {
   if (env.demoMode === "on") return { data: demo(), source: "demo", notice: DEMO_NOTICE };
   try {
     const [data, fromCache] = await cached(key, ttl, live);
@@ -48,14 +49,34 @@ async function withFallback<T>(key: string, ttl: number, live: () => Promise<T>,
   }
 }
 
-export function getProfile(platform: Platform, username: string): Promise<Sourced<Profile>> {
-  return withFallback(
-    `profile:${platform}:${username}:v3`,
-    TTL.profile,
-    () => adapters[platform].getProfile(username),
-    () => demoProfile(platform, username),
-    platform !== "instagram",
-  );
+const STALE_NOTICE =
+  "المصادر بطيئة أو محجوبة الحين — نعرض آخر بيانات حقيقية محفوظة وتتحدث تلقائياً. Sources are slow or blocked right now — showing the last real data we have; it refreshes automatically.";
+
+/**
+ * Profiles never fall back to fake demo data (only DEMO_MODE=on shows demo). Order:
+ * fresh cache → live sources (proxy → direct → Worker, several providers) → in-memory last good
+ * (served after a few seconds while the live call keeps refreshing) → Firestore last good → honest error.
+ */
+export async function getProfile(platform: Platform, username: string): Promise<Sourced<Profile>> {
+  if (env.demoMode === "on") return { data: demoProfile(platform, username), source: "demo", notice: DEMO_NOTICE };
+  const key = `profile:${platform}:${username}:v3`;
+  try {
+    const [data, fromCache, isStale] = await cachedSwr(key, TTL.profile, async () => {
+      const p = await adapters[platform].getProfile(username);
+      saveLastGood(key, p);
+      return p;
+    });
+    return { data, source: fromCache ? "cache" : "live", ...(isStale ? { notice: STALE_NOTICE } : {}) };
+  } catch (e) {
+    if (e instanceof PlatformError && (e.code === "blocked" || e.code === "upstream_error")) {
+      const saved = await loadLastGood<Profile>(key);
+      if (saved) {
+        cache.set(`stale:${key}`, saved.value, TTL.stale);
+        return { data: saved.value, source: "cache", notice: STALE_NOTICE };
+      }
+    }
+    throw e;
+  }
 }
 
 const IG_POSTS_NOTICE =

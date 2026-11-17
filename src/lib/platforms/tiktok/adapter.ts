@@ -13,9 +13,11 @@ import { PlatformError, type PlatformAdapter, type Post, type Profile, type Stor
 import { parseEmbedState, parseTikTokRef, parseUserDetail, parseVideoDetail } from "./parser";
 import { mapLimit } from "../../server/concurrency";
 import { countikLanguage } from "./countik";
-import { tikwmPost, tikwmStories, tikwmUser } from "./tikwm";
+import { tikwmPost, tikwmStories } from "./tikwm";
 import { featureOn } from "../../site/flags";
 import { cache, TTL } from "../../server/cache";
+import { runSources, SourceMiss } from "../../sources/run";
+import { countikSource, tiktokExists, tiktokSources } from "./sources";
 
 const BASE = "https://www.tiktok.com";
 const LOCATION_WAIT_MS = 6000;
@@ -58,10 +60,6 @@ async function resolveShortUrl(url: string): Promise<{ id?: string; username?: s
   return parseTikTokRef(res.url);
 }
 
-function isThin(p: Profile): boolean {
-  return !p.id || (!p.secUid && !p.avatarUrl && p.followers === 0 && p.postsCount === 0);
-}
-
 async function enrichLanguage(profile: Profile): Promise<Profile> {
   if (profile.language || !profile.secUid) return profile;
   const language = await countikLanguage(profile.secUid).catch(() => undefined);
@@ -74,48 +72,28 @@ export const tiktok: PlatformAdapter & {
   platform: "tiktok",
 
   async getProfile(username) {
-    let profile: Profile | undefined;
-    let primaryErr: unknown;
+    let profile: Profile;
     let itemIds: string[] = [];
     let seedPosts: Post[] = [];
     try {
-      const { status, profile: p, items } = await fetchProfilePage(username);
-      itemIds = items.map((it) => it.id);
+      const { value, source } = await runSources(`profile:tiktok:${username}`, tiktokSources(username), { staggerMs: 3000, totalMs: 16000 });
+      profile = value.profile;
       // SSR itemList entries already carry locationCreated — use them directly for the country.
-      seedPosts = items;
-      if (status === 10221 || status === 10202 || status === 404 || !p) {
-        primaryErr = new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
-      } else {
-        profile = p;
+      seedPosts = value.items;
+      itemIds = value.items.map((it) => it.id);
+      if (source !== "tt-page" && !profile.secUid) {
+        // Partial source: top up secUid/language from tikwm/countik in the background-friendly way (short wait).
+        const extra = await Promise.race([countikSource(username).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
+        if (extra) profile = { ...extra.profile, ...profile, secUid: extra.profile.secUid, language: profile.language ?? extra.profile.language, followers: extra.profile.followers || profile.followers, likes: extra.profile.likes ?? profile.likes, postsCount: profile.postsCount || extra.profile.postsCount };
       }
     } catch (e) {
-      primaryErr = e;
-    }
-
-    if (!profile || isThin(profile)) {
-      const fb = await tikwmUser(username);
-      if (fb.ok) {
-        profile = profile
-          ? {
-              ...fb.data,
-              ...profile,
-              secUid: profile.secUid || fb.data.secUid,
-              avatarUrl: profile.avatarUrl || fb.data.avatarUrl,
-              likes: profile.likes ?? fb.data.likes,
-              createdAt: profile.createdAt ?? fb.data.createdAt,
-              language: profile.language ?? fb.data.language,
-              hasStory: profile.hasStory || fb.data.hasStory,
-            }
-          : fb.data;
-      } else if (!profile) {
-        const blockedish =
-          primaryErr instanceof PlatformError && (primaryErr.code === "blocked" || primaryErr.code === "upstream_error");
-        if (primaryErr instanceof PlatformError && primaryErr.code === "not_found") throw primaryErr;
-        if (blockedish || fb.note === "tikwm_blocked" || fb.note === "tikwm_error") {
-          throw primaryErr instanceof PlatformError ? primaryErr : new PlatformError("blocked", "TikTok temporarily blocked the request", 503);
-        }
-        throw primaryErr instanceof PlatformError ? primaryErr : new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
+      if (e instanceof SourceMiss) {
+        if (e.notFound) throw new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
+        const exists = await tiktokExists(username);
+        if (exists === false) throw new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
+        throw new PlatformError("blocked", "TikTok sources are temporarily unavailable", 503);
       }
+      throw e;
     }
 
     profile = await enrichLanguage(profile);

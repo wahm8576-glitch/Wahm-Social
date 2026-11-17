@@ -19,6 +19,7 @@ const ALLOWED_HOST_SUFFIXES = [
   ".cdninstagram.com",
   ".fbcdn.net",
   ".instagram.com",
+  ".dumpor.io",
 ];
 
 export function isAllowedMediaUrl(raw: string): boolean {
@@ -35,6 +36,7 @@ export function isAllowedMediaUrl(raw: string): boolean {
 function refererFor(url: string) {
   if (/instagram|fbcdn/.test(url)) return "https://www.instagram.com/";
   if (/tikwm\.com/.test(url)) return "https://www.tikwm.com/";
+  if (/dumpor\.io/.test(url)) return "https://dumpor.io/";
   return "https://www.tiktok.com/";
 }
 

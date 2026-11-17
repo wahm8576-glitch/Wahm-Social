@@ -23,6 +23,12 @@ export interface FetchOptions {
   failoverOn?: number[];
   /** Which active-proxy pointer to use/advance (Instagram has its own). */
   channel?: ProxyChannel;
+  /** Fallback chain: healthy proxies → direct → Worker relay (short timeouts per step). */
+  chain?: boolean;
+  /** Skip the Worker relay inside baseGet (the chain adds it as its own last step). */
+  noRelay?: boolean;
+  /** Cap proxy failovers within one call. */
+  maxFailovers?: number;
 }
 
 export interface FetchResult {
@@ -30,6 +36,8 @@ export interface FetchResult {
   text: string;
   headers: Headers;
   url: string;
+  /** Which route answered (set by the fallback chain). */
+  via?: "proxy" | "direct" | "relay";
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -45,34 +53,52 @@ export function isInstagramHost(url: string): boolean {
 }
 
 /**
- * Every Instagram request goes through the proxy list (SCRAPER_PROXY / admin "البروكسيات"), in order,
- * moving to the next proxy on connection errors, 407 and 429. If every proxy is refused and the request
- * is a public GET without cookies, the Cloudflare Worker list (RELAY_URL) is tried as the last fallback.
- * A direct request from the server IP happens only when no proxy and no Worker is configured at all.
+ * Instagram: healthy proxies first (429 / connection errors fail over, capped), then a DIRECT request
+ * from the server, then the Cloudflare Worker relay. Short timeouts so a page never hangs.
  */
 async function instagramGet(url: string, opts: FetchOptions): Promise<FetchResult> {
-  const failoverOn = [...new Set([...(opts.failoverOn ?? []), 429])];
-  const hasProxy = proxyList().length > 0;
-  // Every proxy is cooling down for Instagram: one plain try through the current one, no failover chain.
-  const allCooling = hasProxy && healthyProxyCount("ig") === 0;
-  const relayable = relayList().length > 0 && canRelayRequest(opts);
-  if (!hasProxy && !relayable) return baseGet(url, { ...opts, proxy: false });
-  let viaProxy: FetchResult | undefined;
-  let proxyErr: unknown;
-  if (hasProxy) {
+  return chainGet(url, { ...opts, failoverOn: [...new Set([...(opts.failoverOn ?? []), 429])] }, igRefused, "ig");
+}
+
+/** Generic "refused" for public pages/APIs: rate limit, server errors, Cloudflare / WAF challenge. */
+export function pageRefused(r: FetchResult): boolean {
+  return r.status === 403 || r.status === 429 || r.status >= 500 || looksLikeBotWall(r.text);
+}
+
+/**
+ * Fallback chain used for Instagram and every public data source:
+ *  1. proxies (only if at least one is healthy; at most 2 proxies per call),
+ *  2. direct from the server IP,
+ *  3. Cloudflare Worker relay (GET without cookies only).
+ * Returns the first answer that is not "refused"; otherwise the best refused answer (so callers can classify it).
+ */
+export async function chainGet(url: string, opts: FetchOptions, refused: (r: FetchResult) => boolean = pageRefused, channel: ProxyChannel = opts.channel ?? "main"): Promise<FetchResult> {
+  const t = opts.timeoutMs ?? 12000;
+  let last: FetchResult | undefined;
+  let err: unknown;
+  if (proxyList().length && healthyProxyCount(channel) > 0) {
     try {
-      viaProxy = await baseGet(url, allCooling ? { ...opts, proxy: true, retries: 0, failoverOn: [], channel: "ig" } : { ...opts, proxy: true, failoverOn, channel: "ig" });
-      if (!igRefused(viaProxy)) return viaProxy;
+      const r = await baseGet(url, { ...opts, proxy: true, channel, retries: 0, noRelay: true, maxFailovers: 1, timeoutMs: Math.min(t, 7000) });
+      if (!refused(r)) return { ...r, via: "proxy" };
+      last = { ...r, via: "proxy" };
     } catch (e) {
-      proxyErr = e;
+      err = e;
     }
   }
-  if (relayable) {
-    const viaRelay = await relayGet(url, opts).catch(() => undefined);
-    if (viaRelay && (!igRefused(viaRelay) || !viaProxy)) return viaRelay;
+  try {
+    const r = await baseGet(url, { ...opts, proxy: false, retries: 0, noRelay: true, timeoutMs: Math.min(t, 6000) });
+    if (!refused(r)) return { ...r, via: "direct" };
+    last = last ?? { ...r, via: "direct" };
+  } catch (e) {
+    err = err ?? e;
   }
-  if (viaProxy) return viaProxy;
-  throw proxyErr ?? new PlatformError("upstream_error", "Instagram request failed via every proxy and Worker", 502);
+  if (relayList().length && canRelayRequest(opts)) {
+    const r = await relayGet(url, { ...opts, timeoutMs: Math.min(t, 8000) }).catch(() => undefined);
+    if (r && !refused(r)) return { ...r, via: "relay" };
+    if (r) last = last ?? { ...r, via: "relay" };
+  }
+  if (last) return last;
+  throw err instanceof Error ? err : new PlatformError("upstream_error", "Request failed via proxies, direct and Worker", 502);
 }
 
 /** Instagram said no: rate limit, or bounced to the login / challenge page. */
@@ -116,8 +142,12 @@ async function relayGet(url: string, opts: FetchOptions): Promise<FetchResult | 
   return undefined;
 }
 
+/** Public data hosts that use the proxy → direct → relay chain unless the caller picked a route. */
+const CHAIN_HOSTS = /(^|\.)(tiktok\.com|tikwm\.com|countik\.com|dumpor\.io)$/i;
+
 export async function httpGet(url: string, opts: FetchOptions = {}): Promise<FetchResult> {
   if (isInstagramHost(url)) return instagramGet(url, opts);
+  if (opts.chain || (opts.proxy === undefined && CHAIN_HOSTS.test(hostOf(url)))) return chainGet(url, opts);
   return baseGet(url, opts);
 }
 
@@ -126,8 +156,8 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
   const ch: ProxyChannel = opts.channel ?? "main";
   // One extra attempt per spare proxy / spare Worker so a dead one fails over within the same call.
   // Cap failovers per call so a long list of bad proxies can never stall a page (cooldowns skip them next time).
-  const spare = opts.proxy ? Math.min(3, Math.max(0, proxyList().length - 1)) : 0;
-  const relaySpare = shouldRelay(url, opts) ? relayList().length : 0;
+  const spare = opts.proxy ? Math.min(opts.maxFailovers ?? 3, Math.max(0, proxyList().length - 1)) : 0;
+  const relaySpare = !opts.noRelay && shouldRelay(url, opts) ? relayList().length : 0;
   const retries = (opts.retries ?? 1) + spare + relaySpare;
   let lastErr: unknown;
   // Once every Worker failed for this call, go direct (or through the proxy).
@@ -136,7 +166,7 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const useRelay = !relayOff && shouldRelay(url, opts);
+    const useRelay = !opts.noRelay && !relayOff && shouldRelay(url, opts);
     let doFetch: typeof fetch | null = null;
     try {
       const fetchUrl = useRelay ? rewriteViaRelay(url) : url;

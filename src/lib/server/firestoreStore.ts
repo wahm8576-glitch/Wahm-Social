@@ -52,3 +52,16 @@ export const firestoreBackend: RemoteBackend = {
     await batch.commit();
   },
 };
+
+/** Persistent last-good copies (collection "profiles"): one small doc per profile key. */
+export async function lastGoodRead(id: string): Promise<{ at: number; json: string } | null> {
+  const db = await store();
+  const d = await db.collection("profiles").doc(id).get();
+  const v = d.data();
+  return v && typeof v.json === "string" ? { at: Number(v.at) || 0, json: v.json } : null;
+}
+
+export async function lastGoodWrite(id: string, key: string, json: string) {
+  const db = await store();
+  await db.collection("profiles").doc(id).set({ key, at: Date.now(), json });
+}

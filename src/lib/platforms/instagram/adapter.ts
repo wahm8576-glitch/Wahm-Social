@@ -17,6 +17,8 @@ import { parseEmbedHtml, parseInstagramRef, parseReelsMedia, parseWebProfile } f
 import { fetchPreview, PREVIEW_TRIES } from "./preview/fetch";
 import { parseOgPost, parseOgProfile } from "./preview/parse";
 import { parseV1Media, parseV1User, pickSearchUser } from "./session/v1";
+import { dumporProfile, igOembed, profileFromOembed } from "./mirrors";
+import { NotFoundHere, runSources, SourceMiss, type Source } from "../../sources/run";
 
 type WebProfile = NonNullable<ReturnType<typeof parseWebProfile>>;
 type Lookup = { found: WebProfile } | { missing: true; attempts: IgAttempt[] } | { blocked: true; attempts: IgAttempt[] };
@@ -199,24 +201,59 @@ const remember = (p: Profile) => {
   return p;
 };
 
+/** Instagram profile sources in priority order (also used by the admin probe). */
+export function instagramSources(username: string): Source<Profile>[] {
+  return [
+    {
+      id: "ig-api",
+      timeoutMs: 16000,
+      run: async () => {
+        const r = await lookup(username);
+        if ("found" in r) return r.found.profile;
+        recordIg(username, r.attempts, "missing" in r ? "empty" : "blocked");
+        if ("missing" in r) return null;
+        throw new Error("blocked (429 / login wall)");
+      },
+    },
+    { id: "dumpor", timeoutMs: 10000, run: () => dumporProfile(username) },
+    {
+      id: "ig-preview",
+      timeoutMs: 12000,
+      run: async () => {
+        const p = await previewProfile(username);
+        if (p === "missing") throw new NotFoundHere();
+        return p;
+      },
+    },
+  ];
+}
+
 export const instagram: PlatformAdapter = {
   platform: "instagram",
 
   async getProfile(username): Promise<Profile> {
-    const r = await lookup(username);
-    if ("found" in r) return remember(r.found.profile);
-    // API refused or said "empty": the public preview is the tie-breaker before we call it missing.
-    const p = await previewProfile(username);
-    recordIg(username, r.attempts, p && p !== "missing" ? "preview" : p === "missing" || "missing" in r ? "empty" : "blocked");
-    if (p && p !== "missing") return remember(p);
-    const stale = lastGood.get(username.toLowerCase());
-    if (p !== "missing" && stale && Date.now() - stale.at < 24 * 3600_000) return stale.profile;
-    if (p === "missing" || "missing" in r) throw new PlatformError("not_found", `@${username} was not found on Instagram`, 404);
-    throw new PlatformError(
-      "blocked",
-      "انستقرام يرفض الطلبات من السيرفر والبروكسي حالياً (حد طلبات 429). ما نعرض بيانات وهمية — جرّب بعد دقائق. Instagram is refusing requests from our server and proxies right now (HTTP 429). No fake data is shown — please try again in a few minutes.",
-      503,
-    );
+    const sources = instagramSources(username);
+    try {
+      const { value, source } = await runSources(`profile:instagram:${username}`, sources, { staggerMs: 3000, totalMs: 18000 });
+      let profile = value;
+      if (source === "dumpor" && !profile.avatarUrl) {
+        const o = await igOembed(username);
+        if (o) profile = { ...profile, avatarUrl: o.avatarUrl };
+      }
+      return remember(profile);
+    } catch (e) {
+      if (!(e instanceof SourceMiss)) throw e;
+      const stale = lastGood.get(username.toLowerCase());
+      if (stale && Date.now() - stale.at < 24 * 3600_000) return stale.profile;
+      const o = await igOembed(username);
+      if (o === false || (e.notFound && !o)) throw new PlatformError("not_found", `@${username} was not found on Instagram`, 404);
+      if (o) return profileFromOembed(o, username);
+      throw new PlatformError(
+        "blocked",
+        "انستقرام يرفض الطلبات حالياً من كل المصادر (البروكسي، المباشر، والمصادر البديلة). ما نعرض بيانات وهمية — جرّب بعد دقائق. Instagram is refusing requests from every source right now. No fake data is shown — please try again in a few minutes.",
+        503,
+      );
+    }
   },
 
   async getPosts(username, opts): Promise<Post[]> {

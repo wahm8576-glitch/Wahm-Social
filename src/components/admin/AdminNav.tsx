@@ -5,6 +5,7 @@ export const ADMIN_TABS: [string, string][] = [
   ["texts", "✏️ الاسم والنصوص"],
   ["seo", "🔎 SEO والصور"],
   ["proxy", "🌐 البروكسي"],
+  ["sources", "📡 مصادر البيانات"],
   ["sessions", "🍪 الجلسات"],
   ["keys", "🔑 المفاتيح"],
   ["features", "🎛️ الميزات والأسعار"],
