@@ -12,6 +12,8 @@ import type { Connection, ConnectionAttempt } from "../../types";
 const BASE = "https://www.tikwm.com/api/user";
 const UNAVAILABLE_TTL = 30 * 60_000;
 const unavailableUntil: Record<string, number> = {};
+/** Daily free-tier quota hit on a route (direct / proxy): skip it for an hour instead of wasting time. */
+const quotaUntil: Record<string, number> = {};
 
 function parse(j: any, kind: "followers" | "following"): Connection[] {
   const d = j?.data ?? {};
@@ -36,6 +38,12 @@ export async function tikwmList(userId: string, kind: "followers" | "following")
     const proxy = routes[i];
     // The repeat slot on a route is only for a rate-limit retry.
     if (i % 2 === 1 && last !== "tikwm_quota") continue;
+    const route = proxy ? "proxy" : "direct";
+    if ((quotaUntil[route] ?? 0) > Date.now()) {
+      last = "tikwm_quota";
+      i += i % 2 === 0 ? 1 : 0;
+      continue;
+    }
     last = "tikwm_error";
     try {
       const res = await httpGet(url, { proxy, retries: 0, timeoutMs: 9000, headers: { accept: "application/json", referer: "https://www.tikwm.com/" } });
@@ -54,8 +62,11 @@ export async function tikwmList(userId: string, kind: "followers" | "following")
         if (/hiding|private/i.test(msg)) return fail("hidden_by_user");
         if (/limit|quota|free api/i.test(msg)) {
           last = "tikwm_quota";
-          logError("tikwm", `${kind} list (${proxy ? "proxy" : "direct"}): ${msg.slice(0, 80)}`);
-          await new Promise((r) => setTimeout(r, 1200));
+          logError("tikwm", `${kind} list (${route}): ${msg.slice(0, 80)}`);
+          if (/day/i.test(msg)) {
+            quotaUntil[route] = Date.now() + 60 * 60_000;
+            i += i % 2 === 0 ? 1 : 0;
+          } else await new Promise((r) => setTimeout(r, 1200));
           continue;
         }
         return fail(msg.slice(0, 40) || "tikwm_error");
