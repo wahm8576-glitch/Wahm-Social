@@ -123,7 +123,8 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
   const { timeoutMs = 12000 } = opts;
   const ch: ProxyChannel = opts.channel ?? "main";
   // One extra attempt per spare proxy / spare Worker so a dead one fails over within the same call.
-  const spare = opts.proxy ? Math.max(0, proxyList().length - 1) : 0;
+  // Cap failovers per call so a long list of bad proxies can never stall a page (cooldowns skip them next time).
+  const spare = opts.proxy ? Math.min(3, Math.max(0, proxyList().length - 1)) : 0;
   const relaySpare = shouldRelay(url, opts) ? relayList().length : 0;
   const retries = (opts.retries ?? 1) + spare + relaySpare;
   let lastErr: unknown;
@@ -151,9 +152,9 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
         signal: ctrl.signal,
         cache: "no-store",
       } as RequestInit);
-      if (doFetch && res.status === 407 && attempt < retries && failoverProxy(ch)) continue;
+      if (doFetch && res.status === 407 && attempt < retries && failoverProxy(ch, "error")) continue;
       // Caller-chosen statuses (e.g. Instagram 429) → try the next proxy in the list.
-      if (doFetch && opts.failoverOn?.includes(res.status) && statusFailovers < spare && attempt < retries && failoverProxy(ch)) {
+      if (doFetch && opts.failoverOn?.includes(res.status) && statusFailovers < spare && attempt < retries && failoverProxy(ch, "status")) {
         statusFailovers++;
         await res.body?.cancel().catch(() => undefined);
         logError("proxy", `HTTP ${res.status} from ${hostOf(url)} via proxy — switched to the next proxy`);
@@ -180,9 +181,9 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
         recordRelayTry(url, undefined, false);
         logError("relay", `Worker request failed for ${hostOf(url)}: ${aborted ? "timeout" : String((e as Error)?.message ?? e)}`);
         if (!failoverRelay()) relayOff = true;
-      } else if (doFetch && !aborted) {
-        logError("proxy", `Proxy connection failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
-        failoverProxy(ch);
+      } else if (doFetch) {
+        logError("proxy", `Proxy ${aborted ? "timeout" : "connection failed"} for ${hostOf(url)}${aborted ? "" : `: ${String((e as Error)?.message ?? e)}`}`);
+        failoverProxy(ch, "error");
       }
       if (attempt < retries) await sleep(400 * (attempt + 1));
     } finally {
@@ -239,31 +240,73 @@ export function proxyList(raw = process.env.SCRAPER_PROXY ?? ""): string[] {
   return raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 }
 /**
- * Two independent "active proxy" pointers: one for Instagram, one for everything else (TikTok
- * session/followers browser, tikwm/countik). Instagram 429s flip only the Instagram pointer, so they
- * can no longer bounce the proxy the TikTok followers browser / session requests are using.
+ * Proxy health, per channel ("ig" for Instagram, "main" for everything else).
+ * - Each channel keeps a sticky "current" proxy (list order = preference).
+ * - A proxy that errors / times out / answers 407 or 429 is put on a short cooldown for that channel
+ *   and the next healthy one is used immediately. Cooled-down proxies are skipped until they expire;
+ *   if every proxy is cooling, the one that recovers first is used.
  */
 export type ProxyChannel = "main" | "ig";
-const pg = globalThis as unknown as { __frostlyProxyIdx?: Record<ProxyChannel, number>; __frostlyProxyKey?: string };
-export function activeProxyIndex(channel: ProxyChannel = "main"): number {
+const COOLDOWN_MS = { error: 3 * 60_000, status: 90_000 };
+const pg = globalThis as unknown as {
+  __frostlyProxyCur?: Record<ProxyChannel, number>;
+  __frostlyProxyKey?: string;
+  __frostlyProxyBad?: Map<string, number>;
+};
+function state() {
   const list = proxyList();
   const key = list.join(",");
-  if (pg.__frostlyProxyKey !== key || typeof pg.__frostlyProxyIdx !== "object" || !pg.__frostlyProxyIdx) {
+  if (pg.__frostlyProxyKey !== key || !pg.__frostlyProxyCur || !pg.__frostlyProxyBad) {
     pg.__frostlyProxyKey = key;
-    pg.__frostlyProxyIdx = { main: 0, ig: 0 };
+    pg.__frostlyProxyCur = { main: 0, ig: 0 };
+    pg.__frostlyProxyBad = new Map();
   }
-  return list.length ? (pg.__frostlyProxyIdx[channel] ?? 0) % list.length : 0;
+  return { list, cur: pg.__frostlyProxyCur, bad: pg.__frostlyProxyBad };
+}
+const coolKey = (ch: ProxyChannel, url: string) => `${ch}|${url}`;
+function cooling(ch: ProxyChannel, url: string, now = Date.now()): boolean {
+  const until = state().bad.get(coolKey(ch, url));
+  return until !== undefined && until > now;
+}
+/** Index of the proxy a channel should use now (sticky current unless it is cooling down). */
+export function activeProxyIndex(channel: ProxyChannel = "main"): number {
+  const { list, cur, bad } = state();
+  if (!list.length) return 0;
+  const now = Date.now();
+  const start = (cur[channel] ?? 0) % list.length;
+  for (let i = 0; i < list.length; i++) {
+    const idx = (start + i) % list.length;
+    if (!cooling(channel, list[idx], now)) {
+      cur[channel] = idx;
+      return idx;
+    }
+  }
+  // Everything is cooling: take the one that recovers first.
+  let best = start;
+  let bestUntil = Infinity;
+  list.forEach((u, idx) => {
+    const until = bad.get(coolKey(channel, u)) ?? 0;
+    if (until < bestUntil) (bestUntil = until), (best = idx);
+  });
+  return best;
 }
 export function activeProxy(channel: ProxyChannel = "main"): string {
   const list = proxyList();
   return list.length ? list[activeProxyIndex(channel)] : "";
 }
-function failoverProxy(channel: ProxyChannel = "main"): boolean {
-  const list = proxyList();
+/** Healthy (not cooling) proxy count for a channel — for diagnostics. */
+export function healthyProxyCount(channel: ProxyChannel = "main"): number {
+  return proxyList().filter((u) => !cooling(channel, u)).length;
+}
+/** Put the current proxy of a channel on cooldown and move to the next healthy one. */
+function failoverProxy(channel: ProxyChannel = "main", kind: "error" | "status" = "error"): boolean {
+  const { list, cur, bad } = state();
   if (list.length < 2) return false;
-  const next = (activeProxyIndex(channel) + 1) % list.length;
-  pg.__frostlyProxyIdx![channel] = next;
-  console.warn(`[proxy] ${channel} failover -> #${next}`);
+  const idx = activeProxyIndex(channel);
+  bad.set(coolKey(channel, list[idx]), Date.now() + COOLDOWN_MS[kind]);
+  cur[channel] = (idx + 1) % list.length;
+  const next = activeProxyIndex(channel);
+  console.warn(`[proxy] ${channel} #${idx + 1} cooling (${kind}) -> #${next + 1}`);
   return true;
 }
 /** Parse proxy credentials for Chromium (--proxy-server + page.authenticate). */
@@ -302,20 +345,26 @@ export async function proxiedFetch(override?: string, channel: ProxyChannel = "m
  */
 export async function proxiedStream(url: string, init: RequestInit, channel: ProxyChannel = "ig"): Promise<Response | null> {
   const list = proxyList();
-  for (let i = 0; i < list.length; i++) {
+  const tries = Math.min(list.length, 3);
+  for (let i = 0; i < tries; i++) {
     const f = await proxiedFetch(undefined, channel);
     if (!f) return null;
+    // Time-limit only the wait for response headers (the body may be a long video stream).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
     try {
-      const res = await f(url, init);
-      if ((res.status === 407 || res.status === 429) && i < list.length - 1) {
+      const res = await f(url, { ...init, signal: ctrl.signal });
+      clearTimeout(timer);
+      if ((res.status === 407 || res.status === 429) && i < tries - 1) {
         await res.body?.cancel().catch(() => undefined);
-        failoverProxy(channel);
+        failoverProxy(channel, res.status === 429 ? "status" : "error");
         continue;
       }
       return res;
     } catch (e) {
+      clearTimeout(timer);
       logError("proxy", `Proxy media fetch failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
-      if (!failoverProxy(channel)) return null;
+      if (!failoverProxy(channel, "error")) return null;
     }
   }
   return null;

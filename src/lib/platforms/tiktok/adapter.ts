@@ -15,8 +15,18 @@ import { mapLimit } from "../../server/concurrency";
 import { countikLanguage } from "./countik";
 import { tikwmPost, tikwmStories, tikwmUser } from "./tikwm";
 import { featureOn } from "../../site/flags";
+import { cache, TTL } from "../../server/cache";
 
 const BASE = "https://www.tiktok.com";
+const LOCATION_WAIT_MS = 6000;
+
+/** Background country result → fill the cached profile so the next view shows it without waiting. */
+function patchCachedProfileLocation(username: string, loc: NonNullable<Profile["location"]>) {
+  for (const key of [`profile:tiktok:${username}:v3`, `stale:profile:tiktok:${username}:v3`]) {
+    const prof = cache.get<Profile>(key);
+    if (prof && !prof.location?.current) cache.set(key, { ...prof, location: loc }, key.startsWith("stale:") ? TTL.stale : TTL.profile);
+  }
+}
 
 async function fetchProfilePage(username: string) {
   const res = await httpGet(`${BASE}/@${encodeURIComponent(username)}?lang=en`, { retries: 1 });
@@ -115,9 +125,15 @@ export const tiktok: PlatformAdapter & {
       profile.location = profile.language ? { recent: [], sample: 0, language: profile.language } : undefined;
       return profile;
     }
-    profile.location = await import("./region").then((m) => m.resolveLocation(profile!, itemIds, seedPosts)).catch(() =>
-      profile!.language ? { recent: [], sample: 0, language: profile!.language } : undefined,
-    );
+    // Never hold the page for the country: wait at most a few seconds, then let the lookup finish in the
+    // background (it caches under tt-loc:<user>, and the next view / posts tab picks it up).
+    const langOnly: Profile["location"] = profile.language ? { recent: [], sample: 0, language: profile.language } : undefined;
+    const locP = import("./region").then((m) => m.resolveLocation(profile!, itemIds, seedPosts)).catch(() => langOnly);
+    profile.location = await Promise.race([locP, new Promise<typeof langOnly>((r) => setTimeout(() => r(langOnly), LOCATION_WAIT_MS))]);
+    if (!profile.location?.current) {
+      const username = profile.username;
+      void locP.then((loc) => loc?.current && patchCachedProfileLocation(username, loc)).catch(() => undefined);
+    }
     return profile;
   },
 

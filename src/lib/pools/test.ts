@@ -2,7 +2,7 @@ import "server-only";
 /** Per-entry test buttons: proxies, Worker relays, TikTok sessions, Instagram sessions. */
 import { proxiedFetch } from "../server/http";
 import { rewriteViaRelay } from "../server/relay";
-import { formatLines, probeCountik, probeInstagram, probeIp, probeTikTok, probeTikwm, type ProbeLine } from "./probe";
+import { formatLines, probeCountik, probeInstagram, probeIp, probeTikTok, probeTikTokLogin, probeTikwm, type ProbeLine } from "./probe";
 import type { PoolEntry, PoolKind } from "./types";
 
 export interface TestResult {
@@ -51,13 +51,13 @@ export async function testEntry(kind: PoolKind, e: PoolEntry): Promise<string> {
     // Session pages are personalised: send them through the active proxy (or direct), never the Worker.
     const f = (await proxiedFetch()) ?? fetch;
     title = `اختبار جلسة تيك توك «${e.label || e.id}» (عبر البروكسي النشط):`;
-    lines = [await probeTikTok(f, e.cookie)];
+    lines = await Promise.all([probeTikTokLogin(f, e.cookie!), probeTikTok(f, e.cookie)]);
   } else {
     const f = (await proxiedFetch(undefined, "ig")) ?? fetch;
     title = `اختبار جلسة انستقرام «${e.label || e.id}» (عبر البروكسي النشط):`;
     lines = [await probeInstagram(f, igCookie(e), e.ig?.csrftoken)];
   }
-  const relevant = kind === "tiktok" ? lines.every((l) => l.verdict === "ok" && !/❌/.test(l.note ?? "")) : lines.some((l) => l.verdict === "ok");
+  const relevant = kind === "tiktok" ? lines[0]?.verdict === "ok" || lines.every((l) => l.verdict === "ok" && !/❌/.test(l.note ?? "")) : lines.some((l) => l.verdict === "ok");
   const summary = lines.map((l) => `${l.target.replace(".com", "")}:${l.verdict === "ok" ? "✅" : l.verdict === "blocked" ? "⛔" : l.verdict === "error" ? "❌" : "⚠️"}${l.target === "IP الخروج" && l.note ? ` ${l.note}` : ""}`).join(" · ");
   results().set(`${kind}:${e.id}`, { at: new Date().toISOString(), ok: relevant, summary });
   return formatLines(title, lines);

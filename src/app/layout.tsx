@@ -19,6 +19,7 @@ import { accentCss } from "@/lib/site/themeCss";
 import { publicSite } from "@/lib/site/publicFlags";
 import { HeadExtras } from "@/components/site/HeadExtras";
 import { Maintenance } from "@/components/site/Maintenance";
+import { NavProgress } from "@/components/layout/NavProgress";
 
 const latin = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const arabic = IBM_Plex_Sans_Arabic({ subsets: ["arabic"], weight: ["400", "500", "600", "700"], variable: "--font-ar", display: "swap" });
@@ -53,6 +54,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {!isPanel && <HeadExtras head={s.head} />}
       </head>
       <body className="font-sans">
+        <NavProgress />
         <I18nProvider locale={locale} t={t} site={publicSite(s)}>
           {isPanel ? (
             <main className="min-h-screen">{children}</main>

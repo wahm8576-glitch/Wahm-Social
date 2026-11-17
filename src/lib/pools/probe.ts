@@ -46,6 +46,34 @@ export async function probeIp(f: F): Promise<ProbeLine> {
   }
 }
 
+/** Is the TikTok session cookie still signed in? (passport account info; returns yes/no only.) */
+export async function probeTikTokLogin(f: F, cookie: string): Promise<ProbeLine> {
+  const t0 = Date.now();
+  try {
+    const { res, text, ms } = await timed(f, "https://www.tiktok.com/passport/web/account/info/?aid=1459&app_language=en&device_platform=web_pc", {
+      headers: { "user-agent": DESKTOP_UA, accept: "application/json", referer: "https://www.tiktok.com/", cookie },
+    });
+    let loggedIn = false;
+    let msg = "";
+    try {
+      const j = JSON.parse(text);
+      loggedIn = Boolean(j?.data?.user_id || j?.data?.user_id_str || j?.data?.username);
+      msg = String(j?.data?.description || j?.message || "").slice(0, 60);
+    } catch {
+      msg = text.length ? "رد غير JSON" : "رد فاضي";
+    }
+    return {
+      target: "جلسة تيك توك",
+      verdict: loggedIn ? "ok" : "blocked",
+      status: res.status,
+      ms,
+      note: loggedIn ? "مسجّلة دخول ✅" : `منتهية/غير مسجّلة ❌${msg ? ` (${msg})` : ""}`,
+    };
+  } catch (e) {
+    return errLine("جلسة تيك توك", e, t0);
+  }
+}
+
 /** TikTok profile page; returns secUid (public id) for the countik probe. */
 export async function probeTikTok(f: F, cookie?: string, target = "https://www.tiktok.com/@tiktok?lang=en"): Promise<ProbeLine & { secUid?: string; loggedIn?: boolean }> {
   const t0 = Date.now();
