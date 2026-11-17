@@ -298,6 +298,10 @@ export function activeProxy(channel: ProxyChannel = "main"): string {
 export function healthyProxyCount(channel: ProxyChannel = "main"): number {
   return proxyList().filter((u) => !cooling(channel, u)).length;
 }
+/** Move a channel to its next proxy (current one cools down briefly). For callers that judge "bad" themselves. */
+export function nextProxy(channel: ProxyChannel = "main"): boolean {
+  return failoverProxy(channel, "status");
+}
 /** Put the current proxy of a channel on cooldown and move to the next healthy one. */
 function failoverProxy(channel: ProxyChannel = "main", kind: "error" | "status" = "error"): boolean {
   const { list, cur, bad } = state();

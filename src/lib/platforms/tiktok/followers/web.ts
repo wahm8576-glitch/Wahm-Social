@@ -10,7 +10,7 @@ import "server-only";
  *
  * Never calls /api/commit/follow/list (returns status_msg "url doesn't match").
  */
-import { cookiesFrom, DESKTOP_UA, httpGet, MOBILE_UA } from "../../../server/http";
+import { activeProxyIndex, cookiesFrom, DESKTOP_UA, httpGet, MOBILE_UA, nextProxy, proxyList } from "../../../server/http";
 import { cookieRaw, cookieValue, hasTikTokSession, tiktokCookieHeader, tiktokWebHeaders, CHROME_UA } from "../session";
 import { browserList, lastBrowserListTry } from "./browser";
 import type { Connection, ConnectionAttempt } from "../../types";
@@ -212,10 +212,13 @@ export async function webList(
     if (!hasTikTokSession()) return { items: [], attempt: { method, ok: false, note: "not_configured" } };
 
     // A) HTTP user/list with refreshed session — www then m, scenes 67/21 then 151.
-    if (secUid) {
+    // Unsigned list calls are answered for some exit IPs and not others: try a few proxies (different IPs).
+    const passes = secUid ? Math.min(4, Math.max(1, proxyList().length)) : 0;
+    for (let pass = 0; pass < passes; pass++) {
+      if (pass > 0 && !nextProxy("main")) break;
       const warm = await refreshSession(username);
       const headers = tiktokWebHeaders(referer, warm.cookie);
-      for (const host of HOSTS) {
+      for (const host of pass === 0 ? HOSTS : HOSTS.slice(0, 1)) {
         const mobile = host.startsWith("m.");
         for (const scene of SCENE[kind]) {
           const url = buildListUrl(host, secUid, scene, {
@@ -235,7 +238,7 @@ export async function webList(
             via: "http",
             scene,
           };
-          console.warn(`[tiktok-followers] http ${host} scene=${scene} status=${r.status} body=${r.bodyLen} note=${r.attempt.note}`);
+          console.warn(`[tiktok-followers] http ${host} scene=${scene} proxy#${activeProxyIndex("main") + 1} status=${r.status} body=${r.bodyLen} note=${r.attempt.note}`);
           if (r.items.length) return { items: r.items, attempt: r.attempt };
         }
       }
