@@ -8,12 +8,14 @@ export async function userForFirebase(email: string, name?: string, emailVerifie
   const e = email.toLowerCase();
   const existing = Users.byEmail(e);
   if (existing) {
-    const patch = { lastLoginAt: Date.now(), emailVerified };
+    const local = e.split("@")[0];
+    const better = name && name.trim() && (!existing.name || existing.name === local) ? name.trim().slice(0, 60) : undefined;
+    const patch = { lastLoginAt: Date.now(), emailVerified, ...(better ? { name: better } : {}) };
     return Users.update(existing.id, { ...patch, role: roleFor({ email: e, emailVerified }) }) ?? existing;
   }
   return Users.create({
     email: e,
-    name: (name || e.split("@")[0]).slice(0, 60),
+    name: (name?.trim() || e.split("@")[0]).slice(0, 60),
     // Firebase owns the password; the local hash is random and never usable.
     passwordHash: await hashPassword(randomBytes(24).toString("base64url")),
     plan: "free",

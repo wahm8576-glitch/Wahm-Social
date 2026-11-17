@@ -10,6 +10,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Banner } from "@/components/layout/Banner";
 import { currentUser, publicUser } from "@/lib/server/auth";
+import { WelcomeToast } from "@/components/auth/WelcomeToast";
 import { env } from "@/lib/env";
 import { jsonLdOrganization, jsonLdWebsite } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -65,6 +66,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <JsonLd data={[jsonLdWebsite(), jsonLdOrganization()]} />
               <Banner s={s} locale={locale} />
               <Header t={t} user={user ? publicUser(user) : null} />
+              {user && <WelcomeToast />}
               <main className="min-h-[60vh]">{children}</main>
               <Footer t={t} />
             </>

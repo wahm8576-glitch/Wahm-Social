@@ -3,8 +3,9 @@ import "server-only";
  * Tiny JSON-file document store. Good for an MVP on a single instance;
  * the Repository interfaces make it straightforward to move to Postgres.
  *
- * NOTE: Render free instances have an ephemeral filesystem; attach a disk
- * (see render.yaml comments) or move to Postgres for durable persistence.
+ * Persistence: when a Firebase service account is configured, every change is mirrored to
+ * Firestore (write-through, see mirror.ts / firestoreStore.ts) and the store is loaded from
+ * Firestore at boot — Render's disk is ephemeral. Without Firebase, the local JSON file is used.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -12,6 +13,7 @@ import crypto from "node:crypto";
 import { env } from "../env";
 import type { Platform } from "../platforms/types";
 import type { PlanId } from "../plans";
+import { Mirror, mergeRows, normEmail, type CollName, type MirrorSpec, type RemoteBackend } from "./mirror";
 
 export interface User {
   id: string;
@@ -98,7 +100,82 @@ class JsonStore {
   mutate<R>(fn: (d: Schema) => R): R {
     const r = fn(this.data);
     this.flush();
+    this.scheduleRemote();
     return r;
+  }
+
+  /* ---------- Remote (Firestore) mirror ---------- */
+  private mirror: Mirror | null = null;
+  private remoteReady = false;
+  private remoteTimer: NodeJS.Timeout | null = null;
+  private lastLowFlush = 0;
+  private flushing: Promise<unknown> = Promise.resolve();
+  remoteState: "off" | "loading" | "ready" | "error" = "off";
+  remoteError = "";
+
+  /** Load from the remote backend (retrying until it works), merge, then mirror every change. */
+  async attachRemote(backend: RemoteBackend, spec: MirrorSpec, retryMs = 20_000): Promise<void> {
+    if (this.mirror) return;
+    this.mirror = new Mirror(backend, spec);
+    this.remoteState = "loading";
+    for (;;) {
+      try {
+        const remote = await backend.load();
+        const idOf: Record<CollName, (r: any) => string> = {
+          users: (u) => normEmail(String(u.email ?? u.id)),
+          watchlist: (w) => String(w.id),
+          payments: (p) => String(p.id),
+          usage: (u) => String(u.key),
+          searches: (x) => `${x.platform}:${x.username}:${x.at}`,
+        };
+        for (const k of Object.keys(idOf) as CollName[]) {
+          const rem = (remote[k] ?? []) as any[];
+          // Remote wins for records it has; records only in memory (created before the load finished) are kept.
+          const remoteIds = new Set(rem.map(idOf[k]));
+          const localOnly = (this.data[k] as any[]).filter((r) => !remoteIds.has(idOf[k](r)));
+          (this.data as any)[k] = mergeRows(rem, localOnly, idOf[k]);
+        }
+        this.data.searches.sort((a, b) => a.at - b.at);
+        this.mirror.primeFrom(remote);
+        this.remoteReady = true;
+        this.remoteState = "ready";
+        this.remoteError = "";
+        this.flush();
+        await this.flushRemote(true);
+        console.log(`[db] firestore ready: ${this.data.users.length} users, ${this.data.watchlist.length} watchlist, ${this.data.payments.length} payments`);
+        return;
+      } catch (e) {
+        this.remoteState = "error";
+        this.remoteError = String((e as Error)?.message ?? e).slice(0, 160);
+        console.error("[db] firestore load failed, retrying:", this.remoteError);
+        await new Promise((r) => setTimeout(r, retryMs));
+      }
+    }
+  }
+
+  private scheduleRemote() {
+    if (!this.remoteReady || this.remoteTimer) return;
+    this.remoteTimer = setTimeout(() => {
+      this.remoteTimer = null;
+      void this.flushRemote(false);
+    }, 1200);
+    this.remoteTimer.unref?.();
+  }
+
+  /** Users / watchlist / payments right away; usage counters and search log at most once a minute (free-tier write quota). */
+  flushRemote(all: boolean): Promise<unknown> {
+    if (!this.mirror || !this.remoteReady) return Promise.resolve();
+    const low = all || Date.now() - this.lastLowFlush > 60_000;
+    const colls: CollName[] = low ? ["users", "watchlist", "payments", "usage", "searches"] : ["users", "watchlist", "payments"];
+    if (low) this.lastLowFlush = Date.now();
+    this.flushing = this.flushing
+      .then(() => this.mirror!.flush(this.data as any, colls))
+      .catch((e) => {
+        this.remoteError = String((e as Error)?.message ?? e).slice(0, 160);
+        console.error("[db] firestore write failed:", this.remoteError);
+        setTimeout(() => this.scheduleRemote(), 10_000).unref?.();
+      });
+    return this.flushing;
   }
 
   private flush() {
@@ -118,6 +195,22 @@ class JsonStore {
 
 const g = globalThis as unknown as { __wahmDb?: JsonStore };
 export const db = (g.__wahmDb ??= new JsonStore());
+
+/** Boot: mirror to Firestore when a service account is configured (waits up to `waitMs` for the first load). */
+export async function initRemoteStore(waitMs = 15_000): Promise<void> {
+  const { firestoreConfigured, firestoreBackend, FIRESTORE_SPEC } = await import("./firestoreStore");
+  if (!firestoreConfigured()) return;
+  const p = db.attachRemote(firestoreBackend, FIRESTORE_SPEC);
+  await Promise.race([p, new Promise((r) => setTimeout(r, waitMs))]);
+  const gg = globalThis as unknown as { __wahmDbSigterm?: boolean };
+  if (!gg.__wahmDbSigterm) {
+    gg.__wahmDbSigterm = true;
+    process.once("SIGTERM", () => {
+      void db.flushRemote(true).finally(() => process.exit(0));
+      setTimeout(() => process.exit(0), 8000).unref?.();
+    });
+  }
+}
 
 export const newId = (prefix = "") => prefix + crypto.randomBytes(9).toString("base64url");
 

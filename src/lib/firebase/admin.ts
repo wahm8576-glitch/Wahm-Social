@@ -7,6 +7,11 @@ import { readServiceAccount } from "./config";
 
 const g = globalThis as unknown as { __fbAdmin?: { key: string; app: App; auth: Auth } };
 
+export async function adminApp(): Promise<App> {
+  await adminAuth();
+  return g.__fbAdmin!.app;
+}
+
 export async function adminAuth(): Promise<Auth> {
   const sa = readServiceAccount();
   if (!sa) throw new Error("Firebase service account is not configured");

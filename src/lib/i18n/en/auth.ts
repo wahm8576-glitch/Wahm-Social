@@ -3,7 +3,7 @@ export const auth = {
     registerTitle: "Create account",
     email: "Email",
     password: "Password",
-    name: "Name",
+    name: "Name (optional)",
     submitLogin: "Sign in",
     submitRegister: "Create account",
     noAccount: "No account?",

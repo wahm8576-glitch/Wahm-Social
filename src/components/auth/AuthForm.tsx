@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useI18n } from "../I18nProvider";
 import { GoogleButton } from "./GoogleButton";
-import { exchange, fbAuth, fbErrorCode, fbMessage, type PublicFirebaseConfig } from "@/lib/firebase/client";
+import { exchange, fbAuth, fbErrorCode, fbMessage, rememberWelcome, type PublicFirebaseConfig } from "@/lib/firebase/client";
+import type { AuthCredential } from "firebase/auth";
 
 export function AuthForm({ mode, firebase }: { mode: "login" | "register"; firebase?: PublicFirebaseConfig | null }) {
   const { t } = useI18n();
@@ -15,6 +16,8 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+  // Google sign-in hit an existing password account with the same email → link after password sign-in.
+  const [pending, setPending] = useState<AuthCredential | null>(null);
 
   const done = () => {
     router.push(next.startsWith("/") ? next : "/account");
@@ -53,7 +56,7 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
     const email = form.email.trim();
     try {
       let cred;
-      if (mode === "register") {
+      if (mode === "register" && !pending) {
         if (form.password.length < 8) throw Object.assign(new Error(), { code: "auth/weak-password" });
         cred = await fa.createUserWithEmailAndPassword(auth, email, form.password);
         if (form.name) await fa.updateProfile(cred.user, { displayName: form.name }).catch(() => {});
@@ -68,6 +71,14 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
           const m = await fetch("/api/auth/firebase/migrate", { method: "POST", body: JSON.stringify({ email, password: form.password }) }).then((r) => r.json()).catch(() => null);
           if (!m?.data?.migrated) throw e;
           cred = await fa.signInWithEmailAndPassword(auth, email, form.password);
+        }
+        if (pending) {
+          try {
+            cred = await fa.linkWithCredential(cred.user, pending);
+          } catch (e) {
+            if (fbErrorCode(e) !== "auth/provider-already-linked") throw e;
+          }
+          setPending(null);
         }
       }
       const r = await exchange(auth, cred, form.name);
@@ -98,6 +109,14 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
         await fa.signInWithRedirect(auth, provider);
         return;
       }
+      if (code === "auth/account-exists-with-different-credential") {
+        const pc = fa.GoogleAuthProvider.credentialFromError(e as never);
+        const em = (e as { customData?: { email?: string } })?.customData?.email;
+        if (pc) setPending(pc);
+        if (em) setForm((f) => ({ ...f, email: em, password: "" }));
+        setInfo("هذا البريد مسجّل بكلمة مرور. اكتب كلمة المرور واضغط دخول — بنربط Google بنفس الحساب وبعدها تقدر تدخل بالطريقتين.");
+        return;
+      }
       setErr(fbMessage(e));
     } finally {
       setBusy(false);
@@ -117,6 +136,7 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
     const j = await res.json();
     setBusy(false);
     if (!j.ok) return setErr(j.error?.message ?? t.auth.error);
+    rememberWelcome(j.data?.name, j.data?.email);
     done();
   }
 
@@ -129,7 +149,7 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
   return (
     <form onSubmit={submit} className="card mx-auto w-full max-w-md space-y-4 p-8">
       <h1 className="text-center text-2xl font-extrabold text-ink">{mode === "login" ? t.auth.loginTitle : t.auth.registerTitle}</h1>
-      {mode === "register" && (
+      {mode === "register" && !pending && (
         <label className="block">
           <span className="mb-1 block text-sm text-ink-3">{t.auth.name}</span>
           <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" />
@@ -162,7 +182,7 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
       {err && <p className="text-sm text-rose-400">{err}</p>}
       {info && <p className="text-sm text-emerald-300">{info}</p>}
       <button className="btn-primary w-full" disabled={busy}>
-        {busy ? "…" : mode === "login" ? t.auth.submitLogin : t.auth.submitRegister}
+        {busy ? "…" : pending ? "دخول وربط Google" : mode === "login" ? t.auth.submitLogin : t.auth.submitRegister}
       </button>
       {firebase && (
         <>

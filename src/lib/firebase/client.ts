@@ -37,15 +37,24 @@ export async function exchange(auth: Auth, cred: UserCredential, name?: string):
   const j = await r.json().catch(() => ({}));
   // The site session is the source of truth; don't keep a second Firebase session in the browser.
   await (await import("firebase/auth")).signOut(auth).catch(() => {});
+  if (j?.ok) rememberWelcome(j.data?.name, j.data?.email);
   return j?.ok ? { ok: true } : { ok: false, message: j?.error?.message };
 }
 
+/** Shown once by <WelcomeToast/> after a successful sign-in. */
+export function rememberWelcome(name?: string, email?: string) {
+  const n = (name || (email ? email.split("@")[0] : "") || "").trim();
+  try {
+    if (n) sessionStorage.setItem("frostly_welcome", n.slice(0, 60));
+  } catch {}
+}
+
 const AR: Record<string, string> = {
-  "auth/invalid-credential": "البريد أو كلمة المرور غير صحيحة.",
+  "auth/invalid-credential": "البريد أو كلمة المرور غير صحيحة. إذا سجّلت عبر Google استخدم زر Google، أو «نسيت كلمة المرور» لإضافة كلمة مرور لحسابك.",
   "auth/wrong-password": "البريد أو كلمة المرور غير صحيحة.",
   "auth/user-not-found": "البريد أو كلمة المرور غير صحيحة.",
   "auth/invalid-email": "البريد الإلكتروني غير صحيح.",
-  "auth/email-already-in-use": "هذا البريد مسجّل مسبقاً — سجّل دخول أو استخدم «نسيت كلمة المرور».",
+  "auth/email-already-in-use": "هذا البريد مسجّل مسبقاً (بكلمة مرور أو عبر Google). سجّل دخول، أو استخدم زر Google، أو «نسيت كلمة المرور» لتعيين كلمة مرور لنفس الحساب.",
   "auth/weak-password": "كلمة المرور ضعيفة — 8 أحرف على الأقل.",
   "auth/too-many-requests": "محاولات كثيرة، انتظر شوي وجرّب مرة ثانية.",
   "auth/network-request-failed": "مشكلة في الاتصال، تأكد من الإنترنت.",
@@ -53,7 +62,8 @@ const AR: Record<string, string> = {
   "auth/cancelled-popup-request": "تم إلغاء الطلب.",
   "auth/unauthorized-domain": "نطاق الموقع غير مضاف في إعدادات Firebase (Authorized domains).",
   "auth/operation-not-allowed": "طريقة الدخول هذي غير مفعّلة في Firebase.",
-  "auth/account-exists-with-different-credential": "البريد مسجّل بطريقة دخول ثانية — سجّل دخول بكلمة المرور أولاً.",
+  "auth/account-exists-with-different-credential": "هذا البريد مسجّل بكلمة مرور. اكتب كلمة المرور بالأسفل لربط Google بنفس الحساب.",
+  "auth/credential-already-in-use": "حساب Google هذا مربوط بحساب ثاني.",
   "auth/user-disabled": "هذا الحساب موقوف.",
 };
 

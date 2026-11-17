@@ -44,6 +44,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { up
       {searchParams.upgraded && <div className="mb-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-200">✓ Frostly {plan.name[locale]}</div>}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
+          <p className="mb-1 text-lg font-bold text-accent-600 dark:text-accent-300">أهلاً {user.name || user.email.split("@")[0]} 👋</p>
           <h1 className="text-3xl font-extrabold text-ink">{t.account.title}</h1>
           <p className="text-ink-3" dir="ltr">
             {user.email}

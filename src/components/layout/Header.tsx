@@ -20,9 +20,9 @@ export function Header({ t, user }: { t: Dict; user: SessionUser | null }) {
           {user ? (
             <Link href="/account" className="btn-ghost btn-sm">
               <span className="grid h-6 w-6 place-items-center rounded-full bg-accent-gradient text-[11px] font-black text-white">
-                {user.name.slice(0, 1).toUpperCase()}
+                {(user.name || user.email).slice(0, 1).toUpperCase()}
               </span>
-              <span className="hidden sm:inline">{user.name}</span>
+              <span className="hidden sm:inline">أهلاً {user.name || user.email.split("@")[0]} 👋</span>
               {user.plan !== "free" && <ProBadge label={user.plan === "business" ? "BIZ" : "PRO"} />}
             </Link>
           ) : (
