@@ -11,6 +11,7 @@ export const ADMIN_TABS: [string, string][] = [
   ["limits", "⏱️ الحدود والكاش"],
   ["site", "🧩 الصيانة والتحليلات والتواصل"],
   ["email", "✉️ البريد / SMTP"],
+  ["firebase", "🔥 Firebase"],
   ["content", "📄 الصفحات والمدونة"],
   ["theme", "🎨 الألوان والثيم"],
   ["status", "🩺 الحالة والكاش"],

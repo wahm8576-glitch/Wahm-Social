@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getSettings } from "@/lib/site/store";
+import { firebaseEnabled } from "@/lib/firebase/config";
 import { z } from "zod";
 import { Users } from "@/lib/server/db";
 import { publicUser, sessionCookie, signSession, verifyPassword } from "@/lib/server/auth";
@@ -10,6 +12,8 @@ const Body = z.object({ email: z.string().email(), password: z.string().min(1) }
 
 export const POST = handler(async (req: Request) => {
   burstGuard(req, "auth", 10);
+  await getSettings();
+  if (firebaseEnabled()) throw new PlatformError("invalid_input", "تسجيل الدخول صار عبر Firebase — حدّث الصفحة. Sign-in now uses Firebase, reload the page.", 410);
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) throw new PlatformError("invalid_input", "Invalid credentials", 400);
   const user = Users.byEmail(parsed.data.email);

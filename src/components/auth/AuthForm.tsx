@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../I18nProvider";
+import { GoogleButton } from "./GoogleButton";
+import { exchange, fbAuth, fbErrorCode, fbMessage, type PublicFirebaseConfig } from "@/lib/firebase/client";
 
-export function AuthForm({ mode }: { mode: "login" | "register" }) {
+export function AuthForm({ mode, firebase }: { mode: "login" | "register"; firebase?: PublicFirebaseConfig | null }) {
   const { t } = useI18n();
   const router = useRouter();
   const next = useSearchParams().get("next") || "/account";
@@ -14,16 +16,107 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const done = () => {
+    router.push(next.startsWith("/") ? next : "/account");
+    router.refresh();
+  };
+
+  // Finish a Google sign-in that fell back to a full-page redirect.
+  useEffect(() => {
+    if (!firebase) return;
+    let alive = true;
+    (async () => {
+      try {
+        const auth = await fbAuth(firebase);
+        const { getRedirectResult } = await import("firebase/auth");
+        const cred = await getRedirectResult(auth);
+        if (!cred || !alive) return;
+        setBusy(true);
+        const r = await exchange(auth, cred);
+        if (r.ok) done();
+        else setErr(r.message ?? t.auth.error);
+      } catch (e) {
+        if (alive && fbErrorCode(e)) setErr(fbMessage(e));
+      } finally {
+        if (alive) setBusy(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebase?.apiKey]);
+
+  async function submitFirebase(cfg: PublicFirebaseConfig) {
+    const fa = await import("firebase/auth");
+    const auth = await fbAuth(cfg);
+    const email = form.email.trim();
+    try {
+      let cred;
+      if (mode === "register") {
+        if (form.password.length < 8) throw Object.assign(new Error(), { code: "auth/weak-password" });
+        cred = await fa.createUserWithEmailAndPassword(auth, email, form.password);
+        if (form.name) await fa.updateProfile(cred.user, { displayName: form.name }).catch(() => {});
+      } else {
+        try {
+          cred = await fa.signInWithEmailAndPassword(auth, email, form.password);
+        } catch (e) {
+          const code = fbErrorCode(e);
+          if (code !== "auth/invalid-credential" && code !== "auth/user-not-found" && code !== "auth/wrong-password") throw e;
+          // Existing site account not yet in Firebase: migrate it with the same password, then retry once.
+          const m = await fetch("/api/auth/firebase/migrate", { method: "POST", body: JSON.stringify({ email, password: form.password }) }).then((r) => r.json()).catch(() => null);
+          if (!m?.data?.migrated) throw e;
+          cred = await fa.signInWithEmailAndPassword(auth, email, form.password);
+        }
+      }
+      const r = await exchange(auth, cred, form.name);
+      if (!r.ok) return setErr(r.message ?? t.auth.error);
+      done();
+    } catch (e) {
+      setErr(fbMessage(e));
+    }
+  }
+
+  async function google() {
+    if (!firebase) return;
+    setBusy(true);
+    setErr("");
+    const fa = await import("firebase/auth");
+    const auth = await fbAuth(firebase);
+    const provider = new fa.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    try {
+      const cred = await fa.signInWithPopup(auth, provider);
+      const r = await exchange(auth, cred);
+      if (!r.ok) setErr(r.message ?? t.auth.error);
+      else done();
+    } catch (e) {
+      const code = fbErrorCode(e);
+      // Popups blocked (e.g. in-app browsers / some mobile Safari setups) → full-page redirect.
+      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+        await fa.signInWithRedirect(auth, provider);
+        return;
+      }
+      setErr(fbMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr("");
+    if (firebase) {
+      await submitFirebase(firebase);
+      setBusy(false);
+      return;
+    }
     const res = await fetch(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify(form) });
     const j = await res.json();
     setBusy(false);
     if (!j.ok) return setErr(j.error?.message ?? t.auth.error);
-    router.push(next.startsWith("/") ? next : "/account");
-    router.refresh();
+    done();
   }
 
   async function magic() {
@@ -70,7 +163,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       <button className="btn-primary w-full" disabled={busy}>
         {busy ? "…" : mode === "login" ? t.auth.submitLogin : t.auth.submitRegister}
       </button>
-      {mode === "login" && (
+      {firebase && (
+        <>
+          <div className="flex items-center gap-3 text-xs text-ink-4">
+            <span className="h-px flex-1 bg-line" />
+            أو
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <GoogleButton onClick={google} busy={busy} label={mode === "login" ? "الدخول عبر Google" : "التسجيل عبر Google"} />
+        </>
+      )}
+      {mode === "login" && !firebase && (
         <button type="button" onClick={magic} className="btn-ghost w-full">
           ✉ {t.auth.magic}
         </button>

@@ -13,6 +13,7 @@ import { sendMail } from "@/lib/mail/send";
 import { publicOrigin } from "@/lib/admin/guard";
 import { env } from "@/lib/env";
 import { getSettings } from "@/lib/site/store";
+import { firebaseEnabled } from "@/lib/firebase/config";
 import { logError } from "@/lib/server/errorLog";
 
 const Body = z.object({ email: z.string().email().max(200) });
@@ -20,6 +21,9 @@ const GENERIC = { ok: true, data: { sent: true } };
 
 export const POST = handler(async (req: Request) => {
   burstGuard(req, "auth", 10);
+  await getSettings();
+  // Legacy email reset is only a fallback: with Firebase on, Google sends the reset email.
+  if (firebaseEnabled()) return NextResponse.json({ ok: false, error: { code: "not_supported", message: "Password reset now uses Firebase, reload the page." } }, { status: 410 });
   const ip = clientIp(req);
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json(GENERIC);

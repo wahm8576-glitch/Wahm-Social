@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getSettings } from "@/lib/site/store";
+import { firebaseEnabled } from "@/lib/firebase/config";
 import { z } from "zod";
 import { Users } from "@/lib/server/db";
 import { hashPassword, publicUser, sessionCookie, signSession } from "@/lib/server/auth";
@@ -12,6 +14,8 @@ const Body = z.object({ token: z.string().min(20).max(2000), password: z.string(
 /** Set a new password with a valid reset token, then sign the user in. */
 export const POST = handler(async (req: Request) => {
   burstGuard(req, "auth", 10);
+  await getSettings();
+  if (firebaseEnabled()) throw new PlatformError("invalid_input", "تسجيل الدخول صار عبر Firebase — حدّث الصفحة. Sign-in now uses Firebase, reload the page.", 410);
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) throw new PlatformError("invalid_input", "كلمة المرور لازم تكون 8 أحرف على الأقل. Password must be at least 8 characters.", 400);
   const user = await verifyResetToken(parsed.data.token, Users.byId);

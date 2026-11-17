@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
+import { fbAuth, fbErrorCode, fbMessage, type PublicFirebaseConfig } from "@/lib/firebase/client";
 
-export function ForgotForm() {
+export function ForgotForm({ firebase }: { firebase?: PublicFirebaseConfig | null }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -13,12 +14,29 @@ export function ForgotForm() {
     setBusy(true);
     setErr("");
     try {
+      if (firebase) {
+        const p = await fetch("/api/auth/firebase/prepare-reset", { method: "POST", body: JSON.stringify({ email }) });
+        if (p.status === 429) {
+          const j = await p.json().catch(() => ({}));
+          setErr(j?.error?.message ?? "محاولات كثيرة، جرّب بعد شوي.");
+          return;
+        }
+        const { sendPasswordResetEmail } = await import("firebase/auth");
+        try {
+          await sendPasswordResetEmail(await fbAuth(firebase), email.trim(), { url: `${location.origin}/login` });
+        } catch (e) {
+          // Never reveal whether the email exists.
+          if (fbErrorCode(e) !== "auth/user-not-found") throw e;
+        }
+        setDone(true);
+        return;
+      }
       const r = await fetch("/api/auth/forgot", { method: "POST", body: JSON.stringify({ email }) });
       const j = await r.json().catch(() => ({}));
       if (r.status === 429) setErr(j?.error?.message ?? "محاولات كثيرة، جرّب بعد شوي.");
       else setDone(true);
-    } catch {
-      setErr("صار خطأ في الاتصال، جرّب مرة ثانية.");
+    } catch (e) {
+      setErr(fbErrorCode(e) ? fbMessage(e) : "صار خطأ في الاتصال، جرّب مرة ثانية.");
     } finally {
       setBusy(false);
     }
@@ -30,7 +48,7 @@ export function ForgotForm() {
       {done ? (
         <div className="space-y-3 text-center">
           <p className="text-sm leading-7 text-emerald-600 dark:text-emerald-300">
-            إذا كان البريد مسجّل عندنا، بيوصلك رابط لإعادة تعيين كلمة المرور خلال دقائق. الرابط صالح 30 دقيقة.
+            إذا كان البريد مسجّل عندنا، بيوصلك رابط لإعادة تعيين كلمة المرور خلال دقائق.
           </p>
           <p className="text-xs text-ink-4">ما وصلك؟ شيّك على الرسائل غير المرغوبة (Spam).</p>
           <Link href="/login" className="btn-ghost inline-block">رجوع لتسجيل الدخول</Link>
