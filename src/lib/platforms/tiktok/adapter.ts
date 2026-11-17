@@ -16,7 +16,7 @@ import { countikLanguage } from "./countik";
 import { tikwmPost, tikwmStories } from "./tikwm";
 import { featureOn } from "../../site/flags";
 import { cache, TTL } from "../../server/cache";
-import { runSources, SourceMiss } from "../../sources/run";
+import { NotFoundHere, runSources, SourceMiss } from "../../sources/run";
 import { countikSource, tiktokExists, tiktokSources } from "./sources";
 
 const BASE = "https://www.tiktok.com";
@@ -76,7 +76,15 @@ export const tiktok: PlatformAdapter & {
     let itemIds: string[] = [];
     let seedPosts: Post[] = [];
     try {
-      const { value, source } = await runSources(`profile:tiktok:${username}`, tiktokSources(username), { staggerMs: 3000, totalMs: 16000 });
+      let pageMissing = false;
+      const list = tiktokSources(username).map((src) =>
+        src.id === "tt-page" ? { ...src, run: () => src.run().catch((e) => { if (e instanceof NotFoundHere) pageMissing = true; throw e; }) } : src,
+      );
+      const { value, source } = await runSources(`profile:tiktok:${username}`, list, { staggerMs: 3000, totalMs: 16000 });
+      // TikTok itself said "no such account" and a third-party copy disagrees (stale/banned account): trust TikTok when oEmbed agrees.
+      if (pageMissing && source !== "tt-page" && (await tiktokExists(username)) === false) {
+        throw new PlatformError("not_found", `@${username} was not found on TikTok`, 404);
+      }
       profile = value.profile;
       // SSR itemList entries already carry locationCreated — use them directly for the country.
       seedPosts = value.items;
