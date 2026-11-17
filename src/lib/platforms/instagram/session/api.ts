@@ -14,7 +14,7 @@ export type IgJson = { ok: true; json: any; attempt: IgAttempt } | { ok: false; 
 
 export async function igJson(url: string, client: IgClient, referer?: string): Promise<IgJson> {
   const host = new URL(url).host;
-  const via = () => (proxyList().length ? `proxy#${activeProxyIndex() + 1}` : "direct");
+  const via = () => (proxyList().length ? `proxy#${activeProxyIndex("ig") + 1}` : "direct");
   try {
     // Every Instagram call goes through SCRAPER_PROXY; a 429 moves on to the next proxy in the list.
     const res = await httpGet(url, { headers: igHeaders(client, referer), retries: 1, timeoutMs: 10000, proxy: true, failoverOn: [429] });

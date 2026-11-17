@@ -21,6 +21,8 @@ export interface FetchOptions {
   proxy?: boolean;
   /** With `proxy`: these HTTP statuses switch to the next proxy and retry (e.g. [429]). */
   failoverOn?: number[];
+  /** Which active-proxy pointer to use/advance (Instagram has its own). */
+  channel?: ProxyChannel;
 }
 
 export interface FetchResult {
@@ -57,7 +59,7 @@ async function instagramGet(url: string, opts: FetchOptions): Promise<FetchResul
   let proxyErr: unknown;
   if (hasProxy) {
     try {
-      viaProxy = await baseGet(url, { ...opts, proxy: true, failoverOn });
+      viaProxy = await baseGet(url, { ...opts, proxy: true, failoverOn, channel: "ig" });
       if (!igRefused(viaProxy)) return viaProxy;
     } catch (e) {
       proxyErr = e;
@@ -119,6 +121,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
 
 async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResult> {
   const { timeoutMs = 12000 } = opts;
+  const ch: ProxyChannel = opts.channel ?? "main";
   // One extra attempt per spare proxy / spare Worker so a dead one fails over within the same call.
   const spare = opts.proxy ? Math.max(0, proxyList().length - 1) : 0;
   const relaySpare = shouldRelay(url, opts) ? relayList().length : 0;
@@ -134,7 +137,7 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
     let doFetch: typeof fetch | null = null;
     try {
       const fetchUrl = useRelay ? rewriteViaRelay(url) : url;
-      doFetch = useRelay ? null : opts.proxy ? await proxiedFetch() : null;
+      doFetch = useRelay ? null : opts.proxy ? await proxiedFetch(undefined, ch) : null;
       const res = await (doFetch ?? fetch)(fetchUrl, {
         method: opts.method ?? "GET",
         body: opts.body,
@@ -148,9 +151,9 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
         signal: ctrl.signal,
         cache: "no-store",
       } as RequestInit);
-      if (doFetch && res.status === 407 && attempt < retries && failoverProxy()) continue;
+      if (doFetch && res.status === 407 && attempt < retries && failoverProxy(ch)) continue;
       // Caller-chosen statuses (e.g. Instagram 429) → try the next proxy in the list.
-      if (doFetch && opts.failoverOn?.includes(res.status) && statusFailovers < spare && attempt < retries && failoverProxy()) {
+      if (doFetch && opts.failoverOn?.includes(res.status) && statusFailovers < spare && attempt < retries && failoverProxy(ch)) {
         statusFailovers++;
         await res.body?.cancel().catch(() => undefined);
         logError("proxy", `HTTP ${res.status} from ${hostOf(url)} via proxy — switched to the next proxy`);
@@ -179,7 +182,7 @@ async function baseGet(url: string, opts: FetchOptions = {}): Promise<FetchResul
         if (!failoverRelay()) relayOff = true;
       } else if (doFetch && !aborted) {
         logError("proxy", `Proxy connection failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
-        failoverProxy();
+        failoverProxy(ch);
       }
       if (attempt < retries) await sleep(400 * (attempt + 1));
     } finally {
@@ -235,25 +238,32 @@ export function looksLikeBotWall(html: string): boolean {
 export function proxyList(raw = process.env.SCRAPER_PROXY ?? ""): string[] {
   return raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 }
-const pg = globalThis as unknown as { __frostlyProxyIdx?: number; __frostlyProxyKey?: string };
-export function activeProxyIndex(): number {
+/**
+ * Two independent "active proxy" pointers: one for Instagram, one for everything else (TikTok
+ * session/followers browser, tikwm/countik). Instagram 429s flip only the Instagram pointer, so they
+ * can no longer bounce the proxy the TikTok followers browser / session requests are using.
+ */
+export type ProxyChannel = "main" | "ig";
+const pg = globalThis as unknown as { __frostlyProxyIdx?: Record<ProxyChannel, number>; __frostlyProxyKey?: string };
+export function activeProxyIndex(channel: ProxyChannel = "main"): number {
   const list = proxyList();
   const key = list.join(",");
-  if (pg.__frostlyProxyKey !== key) {
+  if (pg.__frostlyProxyKey !== key || typeof pg.__frostlyProxyIdx !== "object" || !pg.__frostlyProxyIdx) {
     pg.__frostlyProxyKey = key;
-    pg.__frostlyProxyIdx = 0;
+    pg.__frostlyProxyIdx = { main: 0, ig: 0 };
   }
-  return list.length ? (pg.__frostlyProxyIdx ?? 0) % list.length : 0;
+  return list.length ? (pg.__frostlyProxyIdx[channel] ?? 0) % list.length : 0;
 }
-export function activeProxy(): string {
+export function activeProxy(channel: ProxyChannel = "main"): string {
   const list = proxyList();
-  return list.length ? list[activeProxyIndex()] : "";
+  return list.length ? list[activeProxyIndex(channel)] : "";
 }
-function failoverProxy(): boolean {
+function failoverProxy(channel: ProxyChannel = "main"): boolean {
   const list = proxyList();
   if (list.length < 2) return false;
-  pg.__frostlyProxyIdx = (activeProxyIndex() + 1) % list.length;
-  console.warn(`[proxy] failover -> #${pg.__frostlyProxyIdx}`);
+  const next = (activeProxyIndex(channel) + 1) % list.length;
+  pg.__frostlyProxyIdx![channel] = next;
+  console.warn(`[proxy] ${channel} failover -> #${next}`);
   return true;
 }
 /** Parse proxy credentials for Chromium (--proxy-server + page.authenticate). */
@@ -272,8 +282,8 @@ export function proxyForBrowser(raw = activeProxy()): { server: string; username
 }
 
 const proxyFetchCache = new Map<string, typeof fetch>();
-export async function proxiedFetch(override?: string): Promise<typeof fetch | null> {
-  const url = override ? proxyList(override)[0] : activeProxy();
+export async function proxiedFetch(override?: string, channel: ProxyChannel = "main"): Promise<typeof fetch | null> {
+  const url = override ? proxyList(override)[0] : activeProxy(channel);
   if (!url) return null;
   const hit = proxyFetchCache.get(url);
   if (hit) return hit;
@@ -290,22 +300,22 @@ export async function proxiedFetch(override?: string): Promise<typeof fetch | nu
  * Streaming fetch (images / video) through the proxy list with failover, for Instagram CDNs.
  * Returns null when no proxy is configured or every proxy failed, so the caller can decide what to do.
  */
-export async function proxiedStream(url: string, init: RequestInit): Promise<Response | null> {
+export async function proxiedStream(url: string, init: RequestInit, channel: ProxyChannel = "ig"): Promise<Response | null> {
   const list = proxyList();
   for (let i = 0; i < list.length; i++) {
-    const f = await proxiedFetch();
+    const f = await proxiedFetch(undefined, channel);
     if (!f) return null;
     try {
       const res = await f(url, init);
       if ((res.status === 407 || res.status === 429) && i < list.length - 1) {
         await res.body?.cancel().catch(() => undefined);
-        failoverProxy();
+        failoverProxy(channel);
         continue;
       }
       return res;
     } catch (e) {
       logError("proxy", `Proxy media fetch failed for ${hostOf(url)}: ${String((e as Error)?.message ?? e)}`);
-      if (!failoverProxy()) return null;
+      if (!failoverProxy(channel)) return null;
     }
   }
   return null;

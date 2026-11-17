@@ -53,7 +53,7 @@ export async function testEntry(kind: PoolKind, e: PoolEntry): Promise<string> {
     title = `اختبار جلسة تيك توك «${e.label || e.id}» (عبر البروكسي النشط):`;
     lines = [await probeTikTok(f, e.cookie)];
   } else {
-    const f = (await proxiedFetch()) ?? fetch;
+    const f = (await proxiedFetch(undefined, "ig")) ?? fetch;
     title = `اختبار جلسة انستقرام «${e.label || e.id}» (عبر البروكسي النشط):`;
     lines = [await probeInstagram(f, igCookie(e), e.ig?.csrftoken)];
   }
