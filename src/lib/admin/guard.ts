@@ -8,6 +8,11 @@ import { env } from "../env";
 export function sameOrigin(req: Request): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true; // non-browser clients (curl) — the session cookie still has to be valid
+  const site = req.headers.get("sec-fetch-site");
+  if (site === "cross-site" || site === "same-site") return false;
+  // Safari (and the Fetch spec) send `Origin: null` on form POSTs from a page with
+  // Referrer-Policy: no-referrer. Trust the browser's own Sec-Fetch-Site in that case.
+  if (origin === "null") return site === "same-origin" || site === null;
   try {
     const o = new URL(origin).host;
     const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
