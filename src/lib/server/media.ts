@@ -20,6 +20,7 @@ const ALLOWED_HOST_SUFFIXES = [
   ".fbcdn.net",
   ".instagram.com",
   ".dumpor.io",
+  ".tokcdn.com",
 ];
 
 export function isAllowedMediaUrl(raw: string): boolean {

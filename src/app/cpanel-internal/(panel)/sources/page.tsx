@@ -16,6 +16,9 @@ const ORDER: Record<string, string> = {
   "ig-api": "انستقرام — web_profile_info (جلسة/بدون)",
   dumpor: "dumpor.io (مرآة عامة)",
   "ig-preview": "انستقرام — معاينة الرابط (og)",
+  "tt-stories": "تيك توك — ستوري (واجهة تيك توك نفسها)",
+  savetik: "savetik.co (تحميل بدون علامة)",
+  tikdownloader: "tikdownloader.io (تحميل بدون علامة)",
 };
 
 const ago = (t?: number) => (t ? `${Math.max(0, Math.round((Date.now() - t) / 1000))}ث` : "—");

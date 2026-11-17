@@ -18,6 +18,7 @@ import { featureOn } from "../../site/flags";
 import { cache, TTL } from "../../server/cache";
 import { NotFoundHere, runSources, SourceMiss } from "../../sources/run";
 import { countikSource, tiktokExists, tiktokSources } from "./sources";
+import { freeVideo, tiktokApiStories } from "./free";
 
 const BASE = "https://www.tiktok.com";
 const LOCATION_WAIT_MS = 6000;
@@ -64,6 +65,22 @@ async function enrichLanguage(profile: Profile): Promise<Profile> {
   if (profile.language || !profile.secUid) return profile;
   const language = await countikLanguage(profile.secUid).catch(() => undefined);
   return language ? { ...profile, language } : profile;
+}
+
+/**
+ * Stories: TikTok's own story API first (free, unsigned), then tikwm. `note` is a tikwm problem
+ * only when every source failed — an account with no stories right now is just an empty list.
+ */
+export async function tiktokStories(username: string): Promise<{ items: Story[]; note: string; source: string }> {
+  const cachedProf = cache.get<Profile>(`profile:tiktok:${username}:v3`) ?? cache.get<Profile>(`stale:profile:tiktok:${username}:v3`);
+  let id = cachedProf?.id;
+  if (!id) id = await tiktok.getProfile(username).then((p) => p.id).catch(() => undefined);
+  const own = id ? await tiktokApiStories(id, username) : null;
+  if (own && own.length) return { items: own, note: "ok", source: "tiktok" };
+  const fb = await tikwmStories(username);
+  if (fb.ok && fb.data.length) return { items: fb.data, note: "ok", source: "tikwm" };
+  if (own) return { items: [], note: "ok", source: "tiktok" };
+  return { items: [], note: fb.ok ? "ok" : fb.note, source: "none" };
 }
 
 export const tiktok: PlatformAdapter & {
@@ -162,6 +179,24 @@ export const tiktok: PlatformAdapter & {
       return post;
     } catch (e) {
       const url = `https://www.tiktok.com/@${author}/video/${ref.id}`;
+      // Free downloader first (no tikwm quota), then tikwm.
+      const free = await freeVideo(url);
+      if (free) {
+        const play = free.play || free.hd!;
+        return {
+          platform: "tiktok",
+          id: ref.id,
+          author,
+          caption: free.title ?? "",
+          type: "video",
+          cover: "",
+          media: [{ type: "video", url: play }],
+          music: free.music ? { title: "", author: "", url: free.music } : undefined,
+          stats: {},
+          hashtags: [],
+          url,
+        } as Post;
+      }
       const fb = await tikwmPost(url, author);
       if (fb.ok) return fb.data;
       throw e;
@@ -169,8 +204,6 @@ export const tiktok: PlatformAdapter & {
   },
 
   async getStories(username): Promise<Story[]> {
-    const fb = await tikwmStories(username);
-    if (fb.ok) return fb.data;
-    return [];
+    return (await tiktokStories(username)).items;
   }
 };

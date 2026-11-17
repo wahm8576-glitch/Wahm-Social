@@ -12,7 +12,7 @@ import { tiktok } from "./tiktok/adapter";
 import { demoPosts, demoProfile, demoStories } from "./demo";
 import { hasTikTokSession } from "./tiktok/session";
 import { browserList } from "./tiktok/followers/browser";
-import { tikwmStoriesNote } from "./tiktok/tikwm";
+import { tiktokStories } from "./tiktok/adapter";
 import { connectionsFor } from "./connections";
 import { lockedResult } from "./connections/visibility";
 import { followersShow } from "./connections/show";
@@ -145,8 +145,8 @@ export async function getStories(platform: Platform, username: string): Promise<
   if (platform === "tiktok" && env.demoMode !== "on") {
     try {
       const [payload, fromCache] = await cached(`stories:${platform}:${username}:v3`, TTL.stories, async () => {
-        const items = await adapters.tiktok.getStories(username);
-        return { items, note: tikwmStoriesNote() };
+        const r = await tiktokStories(username);
+        return { items: r.items, note: r.note };
       });
       const notice =
         payload.note === "tikwm_quota"

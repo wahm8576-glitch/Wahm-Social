@@ -7,6 +7,7 @@ import "server-only";
 import { getPost } from "../platforms";
 import { fetchVideoPage } from "../platforms/tiktok/adapter";
 import { tikwmVideo } from "../platforms/tiktok/tikwm";
+import { freeVideo } from "../platforms/tiktok/free";
 import { parseTikTokRef } from "../platforms/tiktok/parser";
 import { PlatformError, type Platform } from "../platforms/types";
 import { cache } from "./cache";
@@ -42,6 +43,14 @@ export async function resolveMedia(platform: Platform, ref: string, opts: { auth
       }
     } catch (e) {
       const url = `https://www.tiktok.com/@${author}/video/${id}`;
+      // Free no-watermark downloaders first (savetik / tikdownloader), tikwm last.
+      const free = await freeVideo(url);
+      if (free && (opts.kind !== "audio" || free.music)) {
+        const file = `frostly_tiktok_${author}_${id}`;
+        out = opts.kind === "audio" ? { url: free.music!, ext: "mp3", filename: `${file}_audio.mp3` } : { url: (free.play || free.hd)!, ext: "mp4", filename: `${file}.mp4` };
+        cache.set(key, out, 5 * 60_000);
+        return out;
+      }
       const fb = await tikwmVideo(url);
       if (!fb.ok) throw e;
       if (opts.kind === "audio") {
