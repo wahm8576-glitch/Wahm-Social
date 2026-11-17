@@ -213,7 +213,7 @@ export async function webList(
 
     // A) HTTP user/list with refreshed session — www then m, scenes 67/21 then 151.
     // Unsigned list calls are answered for some exit IPs and not others: try a few proxies (different IPs).
-    const passes = secUid ? Math.min(4, Math.max(1, proxyList().length)) : 0;
+    const passes = secUid ? Math.min(2, Math.max(1, proxyList().length)) : 0;
     for (let pass = 0; pass < passes; pass++) {
       if (pass > 0 && !nextProxy("main")) break;
       const warm = await refreshSession(username);

@@ -58,6 +58,13 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           autoComplete={mode === "login" ? "current-password" : "new-password"}
         />
       </label>
+      {mode === "login" && (
+        <div className="-mt-2 text-end text-xs">
+          <Link href="/forgot-password" className="text-accent-600 hover:underline dark:text-accent-300">
+            نسيت كلمة المرور؟ Forgot password?
+          </Link>
+        </div>
+      )}
       {err && <p className="text-sm text-rose-400">{err}</p>}
       {info && <p className="text-sm text-emerald-300">{info}</p>}
       <button className="btn-primary w-full" disabled={busy}>

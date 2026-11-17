@@ -266,17 +266,36 @@ async function browserListInner(
               path = `/api/user/list/?${qs.toString()}`;
             }
           } catch { /* use unsigned path; TikTok fetch hooks may still sign */ }
+          // TikTok's security SDK hooks XMLHttpRequest and signs /api/ calls (X-Bogus / X-Gnarly / msToken)
+          // made through it — so try XHR first, then plain fetch.
+          const viaXhr = await new Promise<{ status: number; text: string; url: string }>((resolve) => {
+            try {
+              const x = new XMLHttpRequest();
+              x.open("GET", path, true);
+              x.withCredentials = true;
+              x.setRequestHeader("accept", "application/json, text/plain, */*");
+              x.timeout = 15000;
+              x.onload = () => resolve({ status: x.status, text: x.responseText || "", url: x.responseURL || "" });
+              x.onerror = x.ontimeout = () => resolve({ status: 0, text: "", url: "" });
+              x.send();
+            } catch {
+              resolve({ status: 0, text: "", url: "" });
+            }
+          });
+          if (viaXhr.text.trimStart().startsWith("{") && viaXhr.text.length > 500) {
+            return { status: viaXhr.status, text: viaXhr.text, signed: /X-Bogus|X-Gnarly/.test(viaXhr.url) || path.includes("X-Bogus"), via: "xhr" };
+          }
           try {
             const res = await fetch(path, { credentials: "include", headers: { accept: "application/json" } });
             const text = await res.text();
-            return { status: res.status, text, signed: path.includes("X-Bogus") || path.includes("X-Gnarly") };
+            return { status: res.status, text, signed: path.includes("X-Bogus") || path.includes("X-Gnarly"), via: `fetch(xhr=${viaXhr.status}/${viaXhr.text.length})` };
           } catch (e) {
-            return { status: 0, text: "", err: String(e).slice(0, 80), signed: false };
+            return { status: 0, text: "", err: String(e).slice(0, 80), signed: false, via: "error" };
           }
         },
         { secUid, scene, msToken, verifyFp, deviceId, region: storeRegion },
       );
-      console.warn(`[tiktok-followers] browser inpage status=${inPage.status} body=${(inPage.text || "").length} signed=${inPage.signed}`);
+      console.warn(`[tiktok-followers] browser inpage status=${inPage.status} body=${(inPage.text || "").length} signed=${inPage.signed} via=${(inPage as { via?: string }).via ?? "?"}`);
       if (inPage.text?.trimStart().startsWith("{")) {
         try {
           const j = JSON.parse(inPage.text);
