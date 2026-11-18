@@ -58,7 +58,7 @@ export default async function SourcesPage({ searchParams }: { searchParams: Flas
           <button className="btn-primary">اختبار</button>
         </form>
         {probe && (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="text-ink-4">
                 <th className="text-start">المصدر</th>
@@ -75,12 +75,12 @@ export default async function SourcesPage({ searchParams }: { searchParams: Flas
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </Section>
 
       <Section title="صحة كل مصدر (منذ آخر تشغيل)">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="text-ink-4">
               <th className="text-start">المصدر</th>
@@ -110,11 +110,11 @@ export default async function SourcesPage({ searchParams }: { searchParams: Flas
               </tr>
             )}
           </tbody>
-        </table>
+        </table></div>
       </Section>
 
       <Section title="آخر الطلبات — مين خدمها">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="text-ink-4">
               <th className="text-start">الوقت (الرياض)</th>
@@ -135,7 +135,7 @@ export default async function SourcesPage({ searchParams }: { searchParams: Flas
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </Section>
     </PanelShell>
   );
