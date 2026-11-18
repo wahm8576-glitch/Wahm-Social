@@ -82,3 +82,34 @@ test("passwordStrength scores short, mixed, and strong passwords", () => {
   assert.ok(passwordStrength("Abcdefgh1!").score >= 3);
   assert.equal(passwordStrength("Abcdefghijkl1!").score, 4);
 });
+
+import { smtpDiag, smtpReady, type SmtpConfig } from "../src/lib/mail/config";
+
+const smtp = (over: Partial<SmtpConfig> = {}): SmtpConfig => ({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  user: "sender@gmail.com",
+  pass: "super-secret-app-password",
+  fromName: "Frostly",
+  fromAddress: "sender@gmail.com",
+  replyTo: "",
+  ...over,
+});
+
+test("smtpReady requires host, port, and from or user — not the password", () => {
+  assert.equal(smtpReady(smtp()), true);
+  assert.equal(smtpReady(smtp({ pass: "" })), true);
+  assert.equal(smtpReady(smtp({ host: "", pass: "x" })), false);
+  assert.equal(smtpReady(smtp({ fromAddress: "", user: "" })), false);
+});
+
+test("smtpDiag never includes the password", () => {
+  const line = smtpDiag(smtp());
+  assert.match(line, /ready=true/);
+  assert.match(line, /host=smtp\.gmail.com/);
+  assert.match(line, /port=587/);
+  assert.match(line, /hasPass=true/);
+  assert.doesNotMatch(line, /super-secret/);
+  assert.doesNotMatch(line, /app-password/);
+});

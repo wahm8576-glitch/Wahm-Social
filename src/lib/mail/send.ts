@@ -11,7 +11,11 @@ export interface MailInput {
 }
 
 /** Send one email through the admin-configured SMTP server. Throws a short Arabic message on failure. */
-export async function sendMail(m: MailInput, cfg: SmtpConfig = readSmtp()): Promise<{ messageId: string; fromAddress: string }> {
+export async function sendMail(
+  m: MailInput,
+  cfg: SmtpConfig = readSmtp(),
+  timeouts: { connectionTimeout?: number; greetingTimeout?: number; socketTimeout?: number } = {},
+): Promise<{ messageId: string; fromAddress: string }> {
   if (!smtpReady(cfg)) throw new Error("البريد (SMTP) غير مضبوط في لوحة التحكم");
   const nodemailer = (await import("nodemailer")).default;
   const transport = nodemailer.createTransport({
@@ -19,9 +23,9 @@ export async function sendMail(m: MailInput, cfg: SmtpConfig = readSmtp()): Prom
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
-    connectionTimeout: 12_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
+    connectionTimeout: timeouts.connectionTimeout ?? 8_000,
+    greetingTimeout: timeouts.greetingTimeout ?? 8_000,
+    socketTimeout: timeouts.socketTimeout ?? 15_000,
   });
   const fromAddr = cfg.fromAddress || cfg.user;
   const fromName = (m.fromName || cfg.fromName || "Frostly").replace(/"/g, "");

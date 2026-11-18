@@ -1,8 +1,9 @@
 /**
  * "Forgot password": always answers the same way (never reveals whether an email is registered).
- * Rate limited per IP and per email. When Firebase is on, the server generates an oobCode and
- * sends a branded Frostly email via SMTP (never Firebase's default template).
- * Legacy (Firebase off) still signs a 30-minute token and uses the same branded template.
+ * Rate limited per IP and per email.
+ * Prefers a branded SMTP mail with our /reset-password?oobCode= link. If SMTP is not
+ * configured or the send fails, falls back to Firebase's own email (accounts:sendOobCode).
+ * Legacy (Firebase off) still signs a 30-minute token and uses the branded template.
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { handler } from "@/lib/server/respond";
 import { clientIp, rateLimit } from "@/lib/server/rateLimit";
 import { signResetToken, RESET_TTL_MIN } from "@/lib/server/passwordReset";
 import { sendMail, smtpFromAddress } from "@/lib/mail/send";
+import { smtpDiag, smtpReady } from "@/lib/mail/config";
 import { brandedActionEmail } from "@/lib/mail/templates";
 import { publicOrigin } from "@/lib/admin/guard";
 import { env } from "@/lib/env";
@@ -19,7 +21,9 @@ import { getSettings } from "@/lib/site/store";
 import { firebaseEnabled } from "@/lib/firebase/config";
 import { adminAuth, createFirebaseUser, firebaseUserByEmail } from "@/lib/firebase/admin";
 import { extractOobCode, greetingName, siteResetUrl } from "@/lib/firebase/links";
-import { logError } from "@/lib/server/errorLog";
+import { sendFirebaseOobEmail } from "@/lib/firebase/oob";
+import { ensureFirebaseEmailTemplates } from "@/lib/firebase/emailTemplates";
+import { logError, scrub } from "@/lib/server/errorLog";
 
 const Body = z.object({ email: z.string().email().max(200) });
 const GENERIC = { ok: true, data: { sent: true } };
@@ -44,33 +48,36 @@ async function sendBrandedReset(opts: {
     expiryNote: opts.expiryNote,
     enLine: opts.enLine,
   });
-  const r = await sendMail({
-    to: opts.to,
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-    fromName: mail.fromName,
-  });
-  // Address only — never the password or oobCode.
-  console.info(`[mail] password-reset queued from=${r.fromAddress || smtpFromAddress()}`);
+  const r = await sendMail(
+    { to: opts.to, subject: mail.subject, text: mail.text, html: mail.html, fromName: mail.fromName },
+    undefined,
+    { connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000 },
+  );
+  console.info(`[mail] password-reset path=smtp from=${r.fromAddress || smtpFromAddress()}`);
 }
 
-async function sendFirebaseReset(email: string, origin: string) {
+async function sendSmtpFirebaseReset(email: string, origin: string): Promise<boolean> {
   const siteUser = Users.byEmail(email);
   let fb = await firebaseUserByEmail(email);
   if (!fb && siteUser) {
     fb = await createFirebaseUser({ email, displayName: siteUser.name });
   }
-  if (!fb) return;
-  const raw = await (await adminAuth()).generatePasswordResetLink(email, { url: `${origin}/login` });
+  if (!fb) return false;
+  const raw = await (await adminAuth()).generatePasswordResetLink(email, { url: `${origin}/reset-password` });
   const oob = extractOobCode(raw);
-  if (!oob) {
-    logError("api", "password reset: Firebase link missing oobCode");
-    return;
-  }
+  if (!oob) throw new Error("Firebase link missing oobCode");
   const link = siteResetUrl(origin, oob);
   const name = greetingName(fb.displayName || siteUser?.name, email);
   await sendBrandedReset({ to: email, name, link, origin });
+  return true;
+}
+
+async function fallbackFirebaseOob(email: string, origin: string, reason: string) {
+  console.error(`[mail] smtp failed (${smtpDiag()}): ${scrub(reason)}; fallback=firebase-oob`);
+  logError("mail", `smtp failed (${smtpDiag()}): ${scrub(reason)}; fallback=firebase-oob`);
+  void ensureFirebaseEmailTemplates(origin);
+  const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
+  console.info(`[mail] password-reset path=firebase-oob result=${result}`);
 }
 
 async function sendLegacyReset(email: string, origin: string) {
@@ -106,13 +113,30 @@ export const POST = handler(async (req: Request) => {
   }
   if (!perEmail.allowed) return NextResponse.json(GENERIC);
   const origin = originOf(req);
-  // Await the send so the work is not dropped when the response is flushed.
-  // Always the same JSON so the client cannot tell whether the account exists.
   try {
-    if (firebaseEnabled()) await sendFirebaseReset(email, origin);
-    else await sendLegacyReset(email, origin);
+    if (!firebaseEnabled()) {
+      if (smtpReady()) await sendLegacyReset(email, origin);
+      else console.error(`[mail] password-reset skipped: Firebase off and SMTP not ready (${smtpDiag()})`);
+    } else if (smtpReady()) {
+      try {
+        const sent = await sendSmtpFirebaseReset(email, origin);
+        if (!sent) {
+          // No local record — still try Firebase so we don't miss a Firebase-only account.
+          const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
+          console.info(`[mail] password-reset path=firebase-oob result=${result}`);
+        }
+      } catch (e) {
+        const msg = scrub(String((e as Error)?.message ?? e));
+        await fallbackFirebaseOob(email, origin, msg);
+      }
+    } else {
+      console.error(`[mail] smtp not configured (${smtpDiag()}); fallback=firebase-oob`);
+      void ensureFirebaseEmailTemplates(origin);
+      const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
+      console.info(`[mail] password-reset path=firebase-oob result=${result}`);
+    }
   } catch (e) {
-    const msg = String((e as Error)?.message ?? e).slice(0, 120);
+    const msg = scrub(String((e as Error)?.message ?? e));
     logError("api", `password reset email failed: ${msg}`);
     console.error(`[mail] password-reset failed: ${msg}`);
   }

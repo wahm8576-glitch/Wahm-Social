@@ -38,6 +38,12 @@ export function readSmtp(secrets: Record<string, string> = snapshot().secrets): 
 
 export const smtpReady = (c = readSmtp()) => Boolean(c.host && c.port && (c.fromAddress || c.user));
 
+/** Safe one-line SMTP status for logs — never includes the password or a full address if you don't need it. */
+export function smtpDiag(c = readSmtp()): string {
+  const host = String(c.host || "").replace(/^.*@/, "").split("/")[0].slice(0, 80) || "none";
+  return `ready=${smtpReady(c)} host=${host} port=${c.port} secure=${c.secure} hasUser=${Boolean(c.user)} hasFrom=${Boolean(c.fromAddress)} hasPass=${Boolean(c.pass)}`;
+}
+
 /** Safe view for the panel: never includes the password. */
 export function smtpPublic(c = readSmtp()) {
   const { pass, ...rest } = c;
