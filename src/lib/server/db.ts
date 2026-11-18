@@ -28,6 +28,8 @@ export interface User {
   createdAt: number;
   lastLoginAt?: number;
   apiKey?: string;
+  paypalSubscriptionId?: string;
+  paypalPayerId?: string;
 }
 
 export interface WatchItem {
@@ -56,12 +58,20 @@ export interface Payment {
   id: string;
   userId: string;
   plan: PlanId;
-  interval: "month" | "year";
+  interval: "month" | "year" | "custom";
   amount: number;
   currency: string;
-  provider: "mock" | "stripe";
+  provider: "mock" | "stripe" | "paypal" | "admin";
   status: "paid" | "pending" | "failed";
   createdAt: number;
+  eventId?: string;
+  providerRef?: string;
+}
+
+export interface BillingEvent {
+  id: string;
+  type: string;
+  processedAt: number;
 }
 
 interface Schema {
@@ -70,9 +80,10 @@ interface Schema {
   usage: UsageRecord[];
   searches: SearchLog[];
   payments: Payment[];
+  billingEvents: BillingEvent[];
 }
 
-const empty = (): Schema => ({ users: [], watchlist: [], usage: [], searches: [], payments: [] });
+const empty = (): Schema => ({ users: [], watchlist: [], usage: [], searches: [], payments: [], billingEvents: [] });
 
 class JsonStore {
   private data: Schema;
@@ -125,6 +136,7 @@ class JsonStore {
           users: (u) => normEmail(String(u.email ?? u.id)),
           watchlist: (w) => String(w.id),
           payments: (p) => String(p.id),
+          billingEvents: (e) => String(e.id),
           usage: (u) => String(u.key),
           searches: (x) => `${x.platform}:${x.username}:${x.at}`,
         };
@@ -166,7 +178,7 @@ class JsonStore {
   flushRemote(all: boolean): Promise<unknown> {
     if (!this.mirror || !this.remoteReady) return Promise.resolve();
     const low = all || Date.now() - this.lastLowFlush > 60_000;
-    const colls: CollName[] = low ? ["users", "watchlist", "payments", "usage", "searches"] : ["users", "watchlist", "payments"];
+    const colls: CollName[] = low ? ["users", "watchlist", "payments", "billingEvents", "usage", "searches"] : ["users", "watchlist", "payments", "billingEvents"];
     if (low) this.lastLowFlush = Date.now();
     this.flushing = this.flushing
       .then(() => this.mirror!.flush(this.data as any, colls))
@@ -312,4 +324,15 @@ export const Payments = {
   },
   forUser: (userId: string) => db.get("payments").filter((p) => p.userId === userId),
   all: () => db.get("payments"),
+};
+
+export const BillingEvents = {
+  has: (id: string) => db.get("billingEvents").some((e) => e.id === id),
+  add(id: string, type: string) {
+    if (!id || BillingEvents.has(id)) return;
+    db.mutate((d) => {
+      d.billingEvents.push({ id, type, processedAt: Date.now() });
+      if (d.billingEvents.length > 8000) d.billingEvents = d.billingEvents.slice(-5000);
+    });
+  },
 };

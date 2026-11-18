@@ -7,4 +7,5 @@ export const account = {
     generate: "Generate key",
     payments: "Payments",
     cancel: "Cancel subscription",
+    manage: "Manage subscription",
   };

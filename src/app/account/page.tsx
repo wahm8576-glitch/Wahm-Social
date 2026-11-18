@@ -106,7 +106,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { up
                     ${p.amount} / {p.interval}
                   </td>
                   <td className="py-2">
-                    <Badge tone={p.provider === "mock" ? "blue" : "green"}>{p.provider}</Badge>
+                    <Badge tone={p.provider === "paypal" || p.provider === "stripe" ? "green" : "blue"}>{p.provider}</Badge>
                   </td>
                 </tr>
               ))}

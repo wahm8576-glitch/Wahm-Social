@@ -72,7 +72,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   },
   head: { gaId: "", customHead: "" },
   contact: { email: "", x: "https://x.com/iwahm", instagram: "", tiktok: "https://www.tiktok.com/@iwahm", youtube: "", telegram: "", whatsapp: "", snapchat: "" },
-  pages: { about: { ar: "", en: "" }, privacy: { ar: "", en: "" }, terms: { ar: "", en: "" }, contact: { ar: "", en: "" } },
+  pages: { about: { ar: "", en: "" }, privacy: { ar: "", en: "" }, terms: { ar: "", en: "" }, refund: { ar: "", en: "" }, contact: { ar: "", en: "" } },
   blog: { enabled: true, hidden: [] },
 };
 

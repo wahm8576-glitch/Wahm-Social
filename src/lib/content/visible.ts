@@ -18,7 +18,7 @@ export function visibleArticle(slug: string): Article | undefined {
   return a && visibleArticles().some((x) => x.slug === a.slug) ? a : undefined;
 }
 
-export type PageKey = "about" | "privacy" | "terms" | "contact";
+export type PageKey = "about" | "privacy" | "terms" | "refund" | "contact";
 
 /** Static page body: admin override (Markdown) or the built-in text. */
 export function pageBody(key: PageKey, locale: Locale): string {

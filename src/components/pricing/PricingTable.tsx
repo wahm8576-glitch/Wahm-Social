@@ -3,10 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { FEATURE_LABELS, PLANS, type PlanId } from "@/lib/plans";
+import type { BillingMode } from "@/lib/env";
 import { useI18n, useSite } from "../I18nProvider";
 import { cx, ProBadge } from "../ui";
 
-export function PricingTable({ currentPlan, mock }: { currentPlan: PlanId | null; mock: boolean }) {
+export function PricingTable({ currentPlan, billing }: { currentPlan: PlanId | null; billing: BillingMode }) {
   const { t, locale } = useI18n();
   const site = useSite();
   const router = useRouter();
@@ -22,12 +23,13 @@ export function PricingTable({ currentPlan, mock }: { currentPlan: PlanId | null
     const res = await fetch("/api/billing/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) });
     const json = await res.json();
     setBusy(null);
-    if (!json.ok) return setError(json.error?.message ?? t.states.error);
-    if (json.data.mode === "stripe") window.location.href = json.data.redirect;
-    else {
+    if (!json.ok) return setError(json.error?.message ?? (billing === "off" ? t.pricing.unavailable : t.states.error));
+    if (json.data.mode === "mock") {
       router.push(json.data.redirect);
       router.refresh();
+      return;
     }
+    if (json.data.redirect) window.location.href = json.data.redirect;
   }
 
   if (!site.pro) return <p className="card p-6 text-center text-ink-3">{locale === "ar" ? "اشتراكات برو متوقفة مؤقتاً." : "Pro plans are temporarily unavailable."}</p>;
@@ -46,7 +48,8 @@ export function PricingTable({ currentPlan, mock }: { currentPlan: PlanId | null
             </button>
           ))}
         </div>
-        {mock && <p className="text-xs text-amber-300/80">{t.pricing.mock}</p>}
+        {billing === "mock" && <p className="text-xs text-amber-300/80">{t.pricing.mock}</p>}
+        {billing === "off" && <p className="text-sm text-amber-300/90">{t.pricing.unavailable}</p>}
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
       <div className="grid gap-5 lg:grid-cols-3">
@@ -81,7 +84,7 @@ export function PricingTable({ currentPlan, mock }: { currentPlan: PlanId | null
               </ul>
               <button
                 onClick={() => checkout(p.id)}
-                disabled={isCurrent || busy !== null}
+                disabled={isCurrent || busy !== null || (p.id !== "free" && billing === "off")}
                 className={cx("mt-7 w-full", p.highlight ? "btn-primary" : "btn-ghost")}
               >
                 {isCurrent ? t.pricing.current : busy === p.id ? "…" : p.id === "free" ? t.pricing.startFree : t.pricing.choose}

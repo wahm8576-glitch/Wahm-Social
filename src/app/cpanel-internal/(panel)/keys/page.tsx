@@ -12,7 +12,7 @@ const SESSION_KEYS = new Set(["igSessionId", "igCsrfToken", "igDsUserId", "igMid
 
 const GROUPS: ["tiktok" | "billing", string, string][] = [
   ["tiktok", "🎵 تيك توك — مفاتيح المطورين", "مفاتيح TikTok Research API (اختياري). جلسات تيك توك وانستقرام صارت في صفحة «الجلسات»."],
-  ["billing", "💳 الدفع (Stripe)", "اتركها فاضية لوضع الدفع التجريبي."],
+  ["billing", "💳 الدفع (PayPal)", "الموفّر الأساسي PayPal. اترك المفاتيح فاضية لتعطيل الدفع في الإنتاج (المحاكاة المجانية تعمل فقط على جهاز التطوير)."],
 ];
 
 export default async function KeysPage({ searchParams }: { searchParams: Flashy }) {

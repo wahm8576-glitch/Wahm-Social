@@ -7,4 +7,5 @@ export const account = {
     generate: "توليد مفتاح",
     payments: "المدفوعات",
     cancel: "إلغاء الاشتراك",
+    manage: "إدارة الاشتراك",
   };

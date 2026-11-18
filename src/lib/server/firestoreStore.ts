@@ -25,10 +25,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 export const firestoreBackend: RemoteBackend = {
   async load() {
     const db = await store();
-    const [users, watchlist, payments, usage, app] = await Promise.all([
+    const [users, watchlist, payments, billingEvents, usage, app] = await Promise.all([
       db.collection("users").get(),
       db.collection("watchlist").get(),
       db.collection("payments").get(),
+      db.collection("billingEvents").get(),
       db.collection("usage").where("day", "==", today()).get(),
       db.collection("app").doc("searches").get(),
     ]);
@@ -37,6 +38,7 @@ export const firestoreBackend: RemoteBackend = {
       users: rows(users),
       watchlist: rows(watchlist),
       payments: rows(payments),
+      billingEvents: rows(billingEvents),
       usage: rows(usage).map(({ day: _d, ...rest }) => rest),
       searches: ((app.data()?.items as unknown[]) ?? []),
     };

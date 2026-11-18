@@ -120,7 +120,7 @@ export default async function Home() {
 
       <section className="container-w py-12">
         <h2 className="section-title mb-8 text-center">{t.nav.pricing}</h2>
-        <PricingTable currentPlan={user?.plan ?? null} mock={billingMode() === "mock"} />
+        <PricingTable currentPlan={user?.plan ?? null} billing={billingMode()} />
       </section>
 
       {visibleArticles().length > 0 && (

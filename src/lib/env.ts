@@ -68,6 +68,31 @@ export const env = {
   get stripeWebhookSecret() {
     return read("STRIPE_WEBHOOK_SECRET");
   },
+  get paypalClientId() {
+    return read("PAYPAL_CLIENT_ID");
+  },
+  get paypalClientSecret() {
+    return read("PAYPAL_CLIENT_SECRET");
+  },
+  get paypalWebhookId() {
+    return read("PAYPAL_WEBHOOK_ID");
+  },
+  get paypalEnv() {
+    const v = read("PAYPAL_ENV", "sandbox").toLowerCase();
+    return v === "live" || v === "production" ? "live" : "sandbox";
+  },
+  get paypalPlanProMonthly() {
+    return read("PAYPAL_PLAN_PRO_MONTHLY");
+  },
+  get paypalPlanProYearly() {
+    return read("PAYPAL_PLAN_PRO_YEARLY");
+  },
+  get paypalPlanBizMonthly() {
+    return read("PAYPAL_PLAN_BIZ_MONTHLY");
+  },
+  get paypalPlanBizYearly() {
+    return read("PAYPAL_PLAN_BIZ_YEARLY");
+  },
   get demoMode() {
     return read("DEMO_MODE", "auto") as "auto" | "on" | "off";
   },
@@ -88,10 +113,23 @@ export const env = {
   get onRender() {
     return Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
   },
-  isProd: process.env.NODE_ENV === "production",
+  get isProd() {
+    return process.env.NODE_ENV === "production";
+  },
 };
 
-export const billingMode = (): "stripe" | "mock" => (env.stripeSecret ? "stripe" : "mock");
+
+export type BillingMode = "paypal" | "stripe" | "mock" | "off";
+
+export const paypalConfigured = () => Boolean(env.paypalClientId && env.paypalClientSecret);
+
+/** paypal if credentials exist; else stripe; mock only in local/dev; off in production when nothing is configured. */
+export const billingMode = (): BillingMode => {
+  if (paypalConfigured()) return "paypal";
+  if (env.stripeSecret) return "stripe";
+  if (env.isProd) return "off";
+  return "mock";
+};
 
 /** Official TikTok Research API credentials (https://developers.tiktok.com/products/research-api/). */
 export const tiktokResearch = {

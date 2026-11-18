@@ -39,6 +39,7 @@ export function Footer({ t }: { t: Dict }) {
         ["/about", t.footer.about],
         ["/privacy", t.footer.privacy],
         ["/terms", t.footer.terms],
+        ["/refund", t.footer.refund],
         ["/contact", t.footer.contact],
       ],
     },

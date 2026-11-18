@@ -21,6 +21,14 @@ export const SECRET_DEFS: SecretDef[] = [
   { key: "tiktokClientSecret", env: "TIKTOK_CLIENT_SECRET", label: "TikTok Client Secret", group: "tiktok" },
   { key: "stripeSecretKey", env: "STRIPE_SECRET_KEY", label: "Stripe Secret Key", group: "billing" },
   { key: "stripeWebhookSecret", env: "STRIPE_WEBHOOK_SECRET", label: "Stripe Webhook Secret", group: "billing" },
+  { key: "paypalClientId", env: "PAYPAL_CLIENT_ID", label: "PayPal Client ID", group: "billing" },
+  { key: "paypalClientSecret", env: "PAYPAL_CLIENT_SECRET", label: "PayPal Client Secret", group: "billing" },
+  { key: "paypalWebhookId", env: "PAYPAL_WEBHOOK_ID", label: "PayPal Webhook ID", group: "billing" },
+  { key: "paypalEnv", env: "PAYPAL_ENV", label: "PayPal environment (sandbox أو live)", group: "billing", hint: "sandbox للاختبار، live للإنتاج" },
+  { key: "paypalPlanProMonthly", env: "PAYPAL_PLAN_PRO_MONTHLY", label: "PayPal plan id — Pro شهري", group: "billing" },
+  { key: "paypalPlanProYearly", env: "PAYPAL_PLAN_PRO_YEARLY", label: "PayPal plan id — Pro سنوي", group: "billing" },
+  { key: "paypalPlanBizMonthly", env: "PAYPAL_PLAN_BIZ_MONTHLY", label: "PayPal plan id — Business شهري", group: "billing" },
+  { key: "paypalPlanBizYearly", env: "PAYPAL_PLAN_BIZ_YEARLY", label: "PayPal plan id — Business سنوي", group: "billing" },
 ];
 
 export const SECRET_KEYS = new Set(SECRET_DEFS.map((d) => d.key));

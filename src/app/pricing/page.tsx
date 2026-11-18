@@ -20,7 +20,7 @@ export default async function PricingPage() {
     <div className="container-w pb-10">
       <JsonLd data={jsonLdFaq(FAQ[locale])} />
       <PageHeader title={t.pricing.title} subtitle={t.pricing.subtitle} eyebrow={<Badge tone="gold">Frostly Pro</Badge>} />
-      <PricingTable currentPlan={user?.plan ?? null} mock={billingMode() === "mock"} />
+      <PricingTable currentPlan={user?.plan ?? null} billing={billingMode()} />
       <div className="card mt-16 overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
           <thead>

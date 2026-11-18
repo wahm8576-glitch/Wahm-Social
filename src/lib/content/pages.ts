@@ -10,22 +10,129 @@ export const PAGES: Record<string, { title: { ar: string; en: string }; body: { 
   privacy: {
     title: { ar: "سياسة الخصوصية", en: "Privacy Policy" },
     body: {
-      ar: `## ما نجمعه\n- البريد الإلكتروني والاسم عند إنشاء حساب.\n- سجل استخدام مجهول (عدد عمليات البحث والتحميل اليومية).\n- أسماء المستخدمين التي تبحث عنها لإحصاءات "الأكثر بحثاً" بشكل مجمّع.\n\n## ما لا نجمعه\n- كلمات مرور حسابات تيك توك أو انستقرام.\n- أي محتوى خاص.\n\n## الكوكيز\nنستخدم كوكي جلسة آمنة (httpOnly) وكوكي اللغة فقط.\n\n## حقوقك\nيمكنك طلب حذف حسابك في أي وقت عبر صفحة التواصل.`,
-      en: `## What we collect\n- Email and name when you create an account.\n- Anonymous usage counters (daily lookups and downloads).\n- Searched usernames, aggregated for "trending" stats.\n\n## What we don't collect\n- TikTok or Instagram passwords.\n- Any private content.\n\n## Cookies\nWe only use a secure httpOnly session cookie and a language cookie.\n\n## Your rights\nRequest account deletion at any time via the contact page.`,
+      ar: `## ما نجمعه
+- البريد الإلكتروني والاسم عند إنشاء حساب.
+- سجل استخدام مجهول (عدد عمليات البحث والتحميل اليومية).
+- أسماء المستخدمين التي تبحث عنها لإحصاءات "الأكثر بحثاً" بشكل مجمّع.
+
+## المدفوعات
+المدفوعات تتم عبر **PayPal**. فروستلي لا يستقبل أرقام البطاقات ولا يخزّنها على خوادمه. PayPal يعالج بيانات الدفع وفق سياسة الخصوصية الخاصة به. نحتفظ بسجل محلي للاشتراك (الخطة وتاريخ التجديد ومعرّف الاشتراك) لإدارة حسابك.
+
+## ما لا نجمعه
+- كلمات مرور حسابات تيك توك أو انستقرام.
+- أي محتوى خاص.
+- بيانات بطاقة الدفع.
+
+## الكوكيز
+نستخدم كوكي جلسة آمنة (httpOnly) وكوكي اللغة فقط.
+
+## حقوقك
+يمكنك طلب حذف حسابك في أي وقت عبر صفحة التواصل: wahmsec@gmail.com
+
+البائع: **Frostly**.`,
+      en: `## What we collect
+- Email and name when you create an account.
+- Anonymous usage counters (daily lookups and downloads).
+- Searched usernames, aggregated for "trending" stats.
+
+## Payments
+Payments are processed by **PayPal**. Frostly does not receive or store your card numbers on our servers. PayPal handles payment data under its own privacy policy. We keep a local record of your subscription (plan, renewal date, and subscription id) to manage your account.
+
+## What we don't collect
+- TikTok or Instagram passwords.
+- Any private content.
+- Payment card details.
+
+## Cookies
+We only use a secure httpOnly session cookie and a language cookie.
+
+## Your rights
+Request account deletion at any time via the contact page or wahmsec@gmail.com
+
+Seller: **Frostly**.`,
     },
   },
   terms: {
     title: { ar: "شروط الاستخدام", en: "Terms of Service" },
     body: {
-      ar: `## الاستخدام المقبول\n- استخدم الخدمة للمحتوى العام فقط وللأغراض الشخصية أو التحليلية.\n- لا تعِد نشر محتوى الآخرين دون إذنهم.\n- يُمنع استخدام الخدمة للتحرش أو التتبع المؤذي.\n\n## الاشتراكات\n- تتجدد اشتراكات برو تلقائياً ويمكن إلغاؤها في أي وقت.\n- تظل الميزات فعالة حتى نهاية الفترة المدفوعة.\n\n## إخلاء مسؤولية\nفروستلي غير تابع لتيك توك أو انستقرام. توفر البيانات يعتمد على المنصات نفسها.`,
-      en: `## Acceptable use\n- Use the service for public content only, for personal or analytical purposes.\n- Don't repost others' content without permission.\n- Harassment or harmful tracking is prohibited.\n\n## Subscriptions\n- Pro renews automatically and can be cancelled any time.\n- Features stay active until the end of the paid period.\n\n## Disclaimer\nFrostly is not affiliated with TikTok or Instagram. Data availability depends on the platforms.`,
+      ar: `## الاستخدام المقبول
+- استخدم الخدمة للمحتوى العام فقط وللأغراض الشخصية أو التحليلية.
+- لا تعِد نشر محتوى الآخرين دون إذنهم.
+- يُمنع استخدام الخدمة للتحرش أو التتبع المؤذي.
+
+## الاشتراكات والدفع
+- البائع هو **Frostly**. تُعالج المدفوعات عبر **PayPal**.
+- تتجدد اشتراكات برو وأعمال تلقائياً ما لم تُلغَ. يمكنك الإلغاء في أي وقت من صفحة حسابي؛ تظل الميزات فعالة حتى نهاية الفترة المدفوعة.
+- الأسعار معروضة بالدولار الأمريكي وقد تُضاف ضرائب وفق قواعد PayPal ومنطقتك.
+- سياسة الاسترجاع موضّحة في صفحة [الاسترجاع](/refund): استرجاع خلال 14 يوماً عند الطلب المعقول.
+
+## إخلاء مسؤولية
+فروستلي غير تابع لتيك توك أو انستقرام. توفر البيانات يعتمد على المنصات نفسها.
+
+للتواصل: wahmsec@gmail.com`,
+      en: `## Acceptable use
+- Use the service for public content only, for personal or analytical purposes.
+- Don't repost others' content without permission.
+- Harassment or harmful tracking is prohibited.
+
+## Subscriptions and payment
+- The seller is **Frostly**. Payments are processed by **PayPal**.
+- Pro and Business plans renew automatically unless cancelled. You can cancel any time from your account page; features stay active until the end of the paid period.
+- Prices are shown in USD; taxes may be added according to PayPal's rules and your region.
+- Refunds are described on the [Refund Policy](/refund) page: a 14-day refund on a reasonable request.
+
+## Disclaimer
+Frostly is not affiliated with TikTok or Instagram. Data availability depends on the platforms.
+
+Contact: wahmsec@gmail.com`,
+    },
+  },
+  refund: {
+    title: { ar: "سياسة الاسترجاع", en: "Refund Policy" },
+    body: {
+      ar: `## الاسترجاع خلال 14 يوماً
+إذا لم يناسبك الاشتراك، يمكنك طلب استرجاع خلال **14 يوماً** من تاريخ الدفع. راسلنا على **wahmsec@gmail.com** من البريد المرتبط بحسابك، واذكر معرّف الدفع إن وُجد.
+
+## بعد 14 يوماً
+بعد هذه المدة لا نضمن الاسترجاع للفترة المستخدمة، وقد ننظر في الحالات الاستثنائية (خصم مكرر أو خطأ تقني).
+
+## طريقة الاسترجاع
+المدفوعات تتم عبر **PayPal**، ويُعاد المبلغ عادةً إلى نفس طريقة الدفع في PayPal خلال عدة أيام عمل بعد الموافقة.
+
+## الإلغاء
+إلغاء التجديد لا يوقف الفترة المدفوعة الحالية؛ تظل الميزات تعمل حتى تاريخ انتهائها. يمكنك الإلغاء من صفحة حسابي.
+
+البائع: **Frostly**. للتواصل: wahmsec@gmail.com`,
+      en: `## 14-day refund
+If the subscription isn't right for you, you may request a refund within **14 days** of payment. Email **wahmsec@gmail.com** from the address on your account and include the payment reference if you have one.
+
+## After 14 days
+We don't guarantee a refund for time already used after this window, though we may consider exceptional cases (a duplicate charge or a technical error).
+
+## How refunds are paid
+Payments are processed by **PayPal**. Approved refunds are typically returned to the original PayPal payment method within several business days.
+
+## Cancellation
+Cancelling stops future renewals but does not end the current paid period; features stay active until it expires. You can cancel from your account page.
+
+Seller: **Frostly**. Contact: wahmsec@gmail.com`,
     },
   },
   contact: {
     title: { ar: "تواصل معنا", en: "Contact" },
     body: {
-      ar: `## الدعم\nتواصل معنا عبر X: **@iwahm**\n\n## الشركات\nلطلبات خطة الأعمال والوصول إلى API، راسلنا مع وصف مختصر لحالة الاستخدام.`,
-      en: `## Support\nReach us on X: **@iwahm**\n\n## Business\nFor Business plan and API access, message us with a short description of your use case.`,
+      ar: `## الدعم
+تواصل معنا عبر البريد: **wahmsec@gmail.com**
+أو عبر X: **@iwahm**
+
+## الشركات
+لطلبات خطة الأعمال والوصول إلى API، راسلنا مع وصف مختصر لحالة الاستخدام.`,
+      en: `## Support
+Email us at **wahmsec@gmail.com**
+or reach us on X: **@iwahm**
+
+## Business
+For Business plan and API access, message us with a short description of your use case.`,
     },
   },
   docs: {

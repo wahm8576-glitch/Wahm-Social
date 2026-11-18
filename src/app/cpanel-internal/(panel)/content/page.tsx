@@ -6,10 +6,11 @@ import { ARTICLES } from "@/lib/content/blog";
 
 export const dynamic = "force-dynamic";
 
-const PAGES: ["about" | "privacy" | "terms" | "contact", string][] = [
+const PAGES: ["about" | "privacy" | "terms" | "refund" | "contact", string][] = [
   ["about", "عن الموقع /about"],
   ["privacy", "سياسة الخصوصية /privacy"],
   ["terms", "شروط الاستخدام /terms"],
+  ["refund", "سياسة الاسترجاع /refund"],
   ["contact", "تواصل معنا /contact"],
 ];
 

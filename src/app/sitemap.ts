@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
-  const staticPaths = ["/", "/explore", "/download", "/stories", "/analytics", "/compare", "/watchlist", "/pricing", "/blog", "/docs", "/api-docs", "/about", "/privacy", "/terms", "/contact"].filter((p) => p !== "/blog" || blogEnabled());
+  const staticPaths = ["/", "/explore", "/download", "/stories", "/analytics", "/compare", "/watchlist", "/pricing", "/blog", "/docs", "/api-docs", "/about", "/privacy", "/terms", "/refund", "/contact"].filter((p) => p !== "/blog" || blogEnabled());
   const profiles = new Map<string, string>();
   FEATURED.forEach((f) => profiles.set(`${f.platform}/${f.username}`, `/${f.platform}/${f.username}`));
   Searches.trending(200).forEach((s) => profiles.set(`${s.platform}/${s.username}`, `/${s.platform}/${s.username}`));

@@ -45,7 +45,7 @@ export const EXTRA_PARSERS: Record<string, (s: SiteSettings, f: FormData) => Sit
     return s;
   },
   pages(s, f) {
-    for (const k of ["about", "privacy", "terms", "contact"] as const) s.pages[k] = bi(f, k, 20000);
+    for (const k of ["about", "privacy", "terms", "refund", "contact"] as const) s.pages[k] = bi(f, k, 20000);
     return s;
   },
   blog(s, f) {

@@ -99,6 +99,7 @@ export interface PagesSettings {
   about: Bi;
   privacy: Bi;
   terms: Bi;
+  refund: Bi;
   contact: Bi;
 }
 
