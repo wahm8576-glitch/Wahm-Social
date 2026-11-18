@@ -106,14 +106,15 @@ export const POST = handler(async (req: Request) => {
   }
   if (!perEmail.allowed) return NextResponse.json(GENERIC);
   const origin = originOf(req);
-  // Work in the background so response timing does not hint whether the account exists.
-  void (async () => {
-    try {
-      if (firebaseEnabled()) await sendFirebaseReset(email, origin);
-      else await sendLegacyReset(email, origin);
-    } catch (e) {
-      logError("api", `password reset email failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
-    }
-  })();
+  // Await the send so the work is not dropped when the response is flushed.
+  // Always the same JSON so the client cannot tell whether the account exists.
+  try {
+    if (firebaseEnabled()) await sendFirebaseReset(email, origin);
+    else await sendLegacyReset(email, origin);
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e).slice(0, 120);
+    logError("api", `password reset email failed: ${msg}`);
+    console.error(`[mail] password-reset failed: ${msg}`);
+  }
   return NextResponse.json(GENERIC);
 });
