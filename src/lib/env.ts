@@ -5,6 +5,8 @@
  * Every field is a getter so values edited in the admin panel (applied onto
  * process.env at runtime, see lib/site/apply.ts) take effect without a redeploy.
  */
+import { igSessionToken } from "./platforms/instagram/session/cookie-env";
+
 function read(name: string, fallback = ""): string {
   const v = process.env[name];
   return v === undefined || v === "" ? fallback : v;
@@ -24,7 +26,8 @@ export const env = {
       .filter(Boolean);
   },
   get igSessionId() {
-    return read("IG_SESSIONID");
+    // Accept a bare token or a pasted cookie header; always return the sessionid token only.
+    return igSessionToken(read("IG_SESSIONID"));
   },
   get igCsrfToken() {
     return read("IG_CSRFTOKEN");

@@ -16,6 +16,7 @@ import { researchConnections } from "../tiktok/research/connections";
 import { webList } from "../tiktok/followers/web";
 import { tikwmList } from "../tiktok/followers/tikwm";
 import { igFriendships } from "../instagram/session/friendships";
+import { resolvePk } from "../instagram/adapter";
 import { igSessionConnections } from "../instagram/session/browser";
 import { hasSession } from "../instagram/session/cookies";
 import { lockedResult, listUrl, visibilityOf } from "./visibility";
@@ -93,9 +94,10 @@ export async function connectionsFor(profile: Profile, kind: "followers" | "foll
   }
 
   const attempts: ConnectionAttempt[] = [];
-  if (hasSession() && /^\d+$/.test(profile.id)) {
+  const pk = /^\d+$/.test(profile.id) ? profile.id : (hasSession() ? await resolvePk(profile.username).catch(() => null) : null);
+  if (hasSession() && pk && /^\d+$/.test(pk)) {
     try {
-      const [items] = await cached(key, TTL, () => igFriendships(profile.id, profile.username, kind));
+      const [items] = await cached(key, TTL, () => igFriendships(pk, profile.username, kind));
       attempts.push({ method: "instagram_session", ok: items.length > 0, note: items.length ? "ok" : "empty" });
       if (items.length) {
         return { available: true, visibility: "public", total, items: items.slice(0, followersShow()), provider: "instagram-session", platformUrl: listUrl(profile, kind), attempts };

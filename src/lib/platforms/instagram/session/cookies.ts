@@ -5,6 +5,7 @@ import "server-only";
  * Values are never logged or returned to clients.
  */
 import { env } from "../../../env";
+import { parseIgCookieEnv } from "./cookie-env";
 
 export const IG_WEB_APP_ID = "936619743392459";
 export const IG_DESKTOP_UA =
@@ -14,20 +15,27 @@ export const IG_ANDROID_UA =
 
 export const hasSession = () => Boolean(env.igSessionId);
 
+function bag() {
+  return parseIgCookieEnv(process.env.IG_SESSIONID ?? "");
+}
+
 function dsUserId(): string {
   if (env.igDsUserId) return env.igDsUserId;
+  if (bag().ds_user_id) return bag().ds_user_id!;
   // A session id starts with the numeric user id ("123%3A..." or "123:...").
   return decodeURIComponent(env.igSessionId).split(":")[0].replace(/\D/g, "");
 }
 
 export function cookieHeader(): string {
   if (!env.igSessionId) return "";
+  const extra = bag();
   const parts: [string, string][] = [
     ["sessionid", env.igSessionId],
     ["ds_user_id", dsUserId()],
-    ["csrftoken", env.igCsrfToken],
-    ["mid", env.igMid],
-    ["datr", env.igDatr],
+    ["csrftoken", env.igCsrfToken || extra.csrftoken || ""],
+    ["mid", env.igMid || extra.mid || ""],
+    ["datr", env.igDatr || extra.datr || ""],
+    ["ig_did", extra.ig_did || ""],
     ["ig_nrcb", "1"],
   ];
   return parts.filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join("; ");
@@ -62,12 +70,14 @@ export const hasIgSession = hasSession;
 
 /** IG cookies for a Chromium session (Puppeteer page.setCookie). */
 export function igSessionCookies(): { name: string; value: string; domain: string; path: string }[] {
+  const extra = bag();
   const pairs: [string, string | undefined][] = [
     ["sessionid", env.igSessionId],
     ["ds_user_id", dsUserId()],
-    ["csrftoken", env.igCsrfToken],
-    ["mid", env.igMid],
-    ["datr", env.igDatr],
+    ["csrftoken", env.igCsrfToken || extra.csrftoken],
+    ["mid", env.igMid || extra.mid],
+    ["datr", env.igDatr || extra.datr],
+    ["ig_did", extra.ig_did],
     ["ig_nrcb", "1"],
   ];
   return pairs.filter(([, v]) => v).map(([name, value]) => ({ name, value: value as string, domain: ".instagram.com", path: "/" }));

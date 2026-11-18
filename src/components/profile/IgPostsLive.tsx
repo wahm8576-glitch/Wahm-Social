@@ -7,9 +7,8 @@ import { PostGrid } from "./PostGrid";
 type State = "loading" | "ready" | "failed";
 
 /**
- * Instagram posts load through the logged-in session browser, which can take up to ~90s on a cold
- * profile. Show a loading state and poll the session endpoint until posts arrive, then render them
- * without a refresh. The "Instagram is limiting posts" banner shows only after the session failed.
+ * Instagram posts: poll the server posts API (private mobile feed first, then other sources).
+ * Chromium is only a last resort on the server and is no longer kicked from this poller.
  */
 export function IgPostsLive({ username, initial, locale }: { username: string; initial: Post[]; locale: Locale }) {
   const [posts, setPosts] = useState<Post[]>(initial);
@@ -20,28 +19,26 @@ export function IgPostsLive({ username, initial, locale }: { username: string; i
     if (initial.length || started.current) return;
     started.current = true;
     let stop = false;
-    const deadline = Date.now() + 90_000;
+    const deadline = Date.now() + 45_000;
     const tick = async () => {
       try {
-        const r = await fetch(`/api/ig-session/${encodeURIComponent(username)}`, { cache: "no-store" });
+        const r = await fetch(`/api/posts/instagram/${encodeURIComponent(username)}?limit=12`, { cache: "no-store" });
         const j = await r.json();
         if (stop) return;
-        if (Array.isArray(j.posts) && j.posts.length) {
-          setPosts(j.posts);
+        const list = Array.isArray(j.data) ? j.data : Array.isArray(j.posts) ? j.posts : [];
+        if (list.length) {
+          setPosts(list);
           setState("ready");
-          window.dispatchEvent(new CustomEvent("ig-counts", { detail: j.profile }));
           return;
         }
-        if (j.done || j.state === "not_configured" || j.state === "checkpoint" || j.state === "logged_out") {
-          if (j.profile) window.dispatchEvent(new CustomEvent("ig-counts", { detail: j.profile }));
-          // "ok with 0 posts" means the account genuinely has none; otherwise it failed.
-          setState(j.state === "ok" ? "ready" : "failed");
+        if (r.status === 403 || j?.error?.code === "private_account" || j?.error?.code === "not_found") {
+          setState("failed");
           return;
         }
       } catch {
-        /* keep polling */
+        /* keep polling a bit — a cold search can take a few seconds */
       }
-      if (!stop && Date.now() < deadline) setTimeout(tick, 3500);
+      if (!stop && Date.now() < deadline) setTimeout(tick, 2500);
       else if (!stop) setState("failed");
     };
     tick();
@@ -56,7 +53,6 @@ export function IgPostsLive({ username, initial, locale }: { username: string; i
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-ink-3" aria-live="polite">
         <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-accent-400 border-t-transparent" />
         <p className="text-sm">{ar ? "جاري جلب المنشورات…" : "Fetching posts…"}</p>
-        <p className="text-xs text-ink-4">{ar ? "قد يستغرق لين ٩٠ ثانية لأول مرة" : "This can take up to 90s the first time"}</p>
       </div>
     );
   }

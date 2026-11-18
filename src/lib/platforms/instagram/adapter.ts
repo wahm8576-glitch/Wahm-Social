@@ -51,7 +51,7 @@ async function lookup(username: string): Promise<Lookup> {
     if (!r.ok) continue;
     const parsed = parseWebProfile(r.json);
     if (parsed) {
-      pkCache.set(username.toLowerCase(), parsed.profile.id);
+      rememberPk(username, parsed.profile.id);
       recordIg(username, attempts, "ok");
       return { found: parsed };
     }
@@ -139,16 +139,56 @@ async function oembedPost(shortcode: string): Promise<Post | null> {
   }
 }
 
-/** Recent posts via feed/user/{pk} when web_profile_info is throttled. */
-async function feedByPk(username: string): Promise<Post[] | null> {
-  const pk = pkCache.get(username.toLowerCase());
+/** Remember a numeric Instagram user id learned from any source. */
+export function rememberPk(username: string, id: string | number | undefined | null) {
+  const pk = String(id ?? "");
+  if (/^\d{5,}$/.test(pk)) pkCache.set(username.toLowerCase(), pk);
+  return pkCache.get(username.toLowerCase()) ?? null;
+}
+
+/** Resolve username → pk without waiting on Chromium. Uses cache, then mobile search. */
+export async function resolvePk(username: string): Promise<string | null> {
+  const hit = pkCache.get(username.toLowerCase());
+  if (hit) return hit;
+  try {
+    const { cache } = await import("../../server/cache");
+    const p = cache.get<{ id?: string }>(`profile:instagram:${username}:v3`);
+    const fromProfile = rememberPk(username, p?.id);
+    if (fromProfile) return fromProfile;
+  } catch {
+    /* cache is optional in tests */
+  }
+  if (!hasSession()) return null;
+  const q = encodeURIComponent(username);
+  const searches: [string, IgClient][] = [
+    [`https://i.instagram.com/api/v1/users/search/?q=${q}&count=10`, "app-session"],
+    [`https://www.instagram.com/web/search/topsearch/?context=blended&query=${q}&include_reel=false`, "web-session"],
+  ];
+  for (const [url, client] of searches) {
+    const r = await igJson(url, client);
+    const u = r.ok ? pickSearchUser(r.json, username) : null;
+    const pk = rememberPk(username, u?.pk ?? u?.pk_id ?? u?.id);
+    if (pk) return pk;
+  }
+  return pkCache.get(username.toLowerCase()) ?? null;
+}
+
+/** Recent posts via the private mobile feed API (fast; no Chromium). */
+async function feedByPk(username: string, limit = 12): Promise<Post[] | null> {
+  const pk = await resolvePk(username);
   if (!pk || !hasSession()) return null;
   for (const [url, client] of [
-    [`https://i.instagram.com/api/v1/feed/user/${pk}/?count=12`, "app-session"],
-    [`https://www.instagram.com/api/v1/feed/user/${pk}/?count=12`, "web-session"],
+    [`https://i.instagram.com/api/v1/feed/user/${pk}/?count=${limit}`, "app-session"],
+    [`https://www.instagram.com/api/v1/feed/user/${pk}/?count=${limit}`, "web-session"],
   ] as [string, IgClient][]) {
     const r = await igJson(url, client, `https://www.instagram.com/${username}/`);
-    if (r.ok && Array.isArray(r.json?.items)) return r.json.items.map((it: unknown) => parseV1Media(it, username));
+    if (r.ok && Array.isArray(r.json?.items) && r.json.items.length) {
+      console.info(`[instagram] @${username} posts path=${client}:feed-user result=ok n=${r.json.items.length}`);
+      return r.json.items.map((it: unknown) => parseV1Media(it, username));
+    }
+    if (r.ok && Array.isArray(r.json?.items)) {
+      console.info(`[instagram] @${username} posts path=${client}:feed-user result=empty`);
+    }
   }
   return null;
 }
@@ -266,19 +306,25 @@ export const instagram: PlatformAdapter = {
 
   async getPosts(username, opts): Promise<Post[]> {
     const limit = opts?.limit ?? 12;
-    // Logged-in session (cached) first — the only reliable public post grid from a datacenter IP.
-    const sess = await igSessionLookup(username).catch(() => null);
-    if (sess?.profile?.isPrivate) throw new PlatformError("private_account", "This account is private", 403);
-    if (sess?.posts.length) return sess.posts.slice(0, limit);
+    // Private mobile/web feed first — Chromium is slow, often busy on Render, and can 429 the session.
+    const feed = await feedByPk(username, limit).catch(() => null);
+    if (feed?.length) return feed.slice(0, limit);
     try {
       const { profile, posts } = await webProfile(username);
       if (profile.isPrivate) throw new PlatformError("private_account", "This account is private", 403);
-      if (posts.length) return posts.slice(0, limit);
+      if (posts.length) {
+        console.info(`[instagram] @${username} posts path=web_profile_info result=ok n=${posts.length}`);
+        return posts.slice(0, limit);
+      }
     } catch (e) {
       if (e instanceof PlatformError && (e.code === "private_account" || e.code === "not_found")) throw e;
     }
-    const feed = await feedByPk(username);
-    if (feed) return feed.slice(0, limit);
+    const sess = await igSessionLookup(username).catch(() => null);
+    if (sess?.profile?.isPrivate) throw new PlatformError("private_account", "This account is private", 403);
+    if (sess?.posts.length) {
+      console.info(`[instagram] @${username} posts path=chromium result=ok n=${sess.posts.length}`);
+      return sess.posts.slice(0, limit);
+    }
     throw new PlatformError("blocked", "Instagram is limiting post listings from this server right now.", 503);
   },
 
@@ -324,17 +370,31 @@ export const instagram: PlatformAdapter = {
     if (!hasSession()) {
       throw new PlatformError("blocked", "Public story viewing requires the server's IG_SESSIONID to be configured.", 503);
     }
-    const { profile } = await webProfile(username);
-    if (profile.isPrivate) throw new PlatformError("private_account", "Stories of private accounts are not available", 403);
+    const pk = await resolvePk(username);
+    let uname = username;
+    if (pk) rememberPk(username, pk);
+    else {
+      const { profile } = await webProfile(username);
+      if (profile.isPrivate) throw new PlatformError("private_account", "Stories of private accounts are not available", 403);
+      rememberPk(username, profile.id);
+      uname = profile.username;
+    }
+    const id = pkCache.get(username.toLowerCase());
+    if (!id) throw new PlatformError("blocked", "Instagram refused the story request — could not resolve the account id.", 503);
     const tries: [string, IgClient][] = [
-      [`https://www.instagram.com/api/v1/feed/reels_media/?reel_ids=${profile.id}`, "web-session"],
-      [`https://i.instagram.com/api/v1/feed/reels_media/?reel_ids=${profile.id}`, "app-session"],
+      [`https://i.instagram.com/api/v1/feed/reels_media/?reel_ids=${id}`, "app-session"],
+      [`https://i.instagram.com/api/v1/feed/user/${id}/story/`, "app-session"],
+      [`https://www.instagram.com/api/v1/feed/reels_media/?reel_ids=${id}`, "web-session"],
     ];
     const attempts: IgAttempt[] = [];
     for (const [url, client] of tries) {
-      const r = await igJson(url, client, `https://www.instagram.com/stories/${profile.username}/`);
+      const r = await igJson(url, client, `https://www.instagram.com/stories/${uname}/`);
       attempts.push(r.attempt);
-      if (r.ok) return parseReelsMedia(r.json, profile.username);
+      if (r.ok) {
+        const stories = parseReelsMedia(r.json, uname);
+        console.info(`[instagram] @${username} stories path=${client}:${url.includes("story") ? "user-story" : "reels_media"} result=ok n=${stories.length}`);
+        return stories;
+      }
     }
     recordIg(username, attempts, "stories_blocked");
     throw new PlatformError("blocked", "Instagram refused the story request — the server session may need re-login.", 503);

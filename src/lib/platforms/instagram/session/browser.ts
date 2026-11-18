@@ -150,7 +150,12 @@ export async function igSessionLookup(username: string, opts: { force?: boolean 
   } else {
     g.__igSessErr = null;
   }
-  if (r.state === "ok" || r.state === "empty") store.set(key, r);
+  // Only cache a genuine result. "empty" with no profile means the scrape failed
+  // (login wall / no graphql) — a 30-minute cache would hide later HTTP fixes.
+  if (r.state === "ok" || (r.state === "empty" && r.profile)) store.set(key, r);
+  else if (r.state === "empty") {
+    store.set(key, { ...r, at: Date.now() - TTL + 120_000 }); // 2-minute negative cache
+  }
   if (store.size > 500) store.delete(store.keys().next().value as string);
   // Upgrade the shared caches with the exact session data (the fast sources may have cached rounded data first).
   if (r.state === "ok" && r.profile) {

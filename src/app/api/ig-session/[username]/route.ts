@@ -20,7 +20,10 @@ export const GET = handler(async (req: Request, { params }: { params: { username
   const username = parseUsername(params.username);
   if (!hasIgSession()) return NextResponse.json({ ok: true, state: "not_configured", done: true });
 
-  igSessionStart(username);
+  // Do not auto-launch Chromium here: it is slow, often busy on Render free, and 429s the HTTP APIs
+  // used for posts. Launch only when explicitly requested (?launch=1) as a last resort.
+  const launch = new URL(req.url).searchParams.get("launch") === "1";
+  if (launch) igSessionStart(username);
   const snap = igSessionPeek(username);
   // Posts may also be in the shared cache (populated by a completed session run).
   const cachedPosts = cache.get<Post[]>(`posts:instagram:${username}:24`) ?? cache.get<Post[]>(`posts:instagram:${username}:12`);
