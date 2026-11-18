@@ -2,7 +2,9 @@ import "server-only";
 /** Per-entry test buttons: proxies, Worker relays, TikTok sessions, Instagram sessions. */
 import { proxiedFetch } from "../server/http";
 import { rewriteViaRelay } from "../server/relay";
-import { formatLines, probeCountik, probeInstagram, probeIp, probeTikTok, probeTikTokLogin, probeTikwm, type ProbeLine } from "./probe";
+import { formatLines, probeCountik, probeIgAccount, probeInstagram, probeIp, probeTikTok, probeTikTokLogin, probeTikwm, type ProbeLine } from "./probe";
+import { recordFailure, recordSuccess } from "./runtime";
+import { persistHealthToFirestore } from "./persist";
 import type { PoolEntry, PoolKind } from "./types";
 
 export interface TestResult {
@@ -52,10 +54,21 @@ export async function testEntry(kind: PoolKind, e: PoolEntry): Promise<string> {
     const f = (await proxiedFetch()) ?? fetch;
     title = `اختبار جلسة تيك توك «${e.label || e.id}» (عبر البروكسي النشط):`;
     lines = await Promise.all([probeTikTokLogin(f, e.cookie!), probeTikTok(f, e.cookie)]);
+    if (lines[0]?.verdict === "ok") recordSuccess("tiktok", e);
+    else if (lines[0]?.verdict === "blocked") recordFailure("tiktok", e, lines[0].note || "blocked", lines[0].status ?? 0);
+    void persistHealthToFirestore();
   } else {
     const f = (await proxiedFetch(undefined, "ig")) ?? fetch;
     title = `اختبار جلسة انستقرام «${e.label || e.id}» (عبر البروكسي النشط):`;
-    lines = [await probeInstagram(f, igCookie(e), e.ig?.csrftoken)];
+    const cookie = igCookie(e);
+    const [ig, acct] = await Promise.all([probeInstagram(f, cookie, e.ig?.csrftoken), probeIgAccount(f, cookie, e.ig?.csrftoken)]);
+    lines = [ig, acct];
+    if (acct.username && ig.verdict === "ok" || acct.verdict === "ok") {
+      recordSuccess("instagram", e, acct.username);
+    } else if (acct.verdict === "blocked" || ig.verdict === "blocked") {
+      recordFailure("instagram", e, acct.note || ig.note || "blocked", acct.status ?? ig.status ?? 0);
+    }
+    void persistHealthToFirestore();
   }
   const relevant = kind === "tiktok" ? lines[0]?.verdict === "ok" || lines.every((l) => l.verdict === "ok" && !/❌/.test(l.note ?? "")) : lines.some((l) => l.verdict === "ok");
   const summary = lines.map((l) => `${l.target.replace(".com", "")}:${l.verdict === "ok" ? "✅" : l.verdict === "blocked" ? "⛔" : l.verdict === "error" ? "❌" : "⚠️"}${l.target === "IP الخروج" && l.note ? ` ${l.note}` : ""}`).join(" · ");

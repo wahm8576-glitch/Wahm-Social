@@ -1,6 +1,7 @@
 /** Read pools from the secrets bag; when a pool was never saved, seed it from the current env values. */
 import type { PoolEntry, PoolKind } from "./types";
 import { poolSecretKey } from "./types";
+import { parseIgCookieEnv } from "../platforms/instagram/session/cookie-env";
 
 const splitList = (raw: string) => raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 
@@ -50,14 +51,49 @@ export function seedFromEnv(kind: PoolKind, env: NodeJS.ProcessEnv = process.env
     return cookie ? [{ id: "env0", label: "الجلسة الحالية", enabled: true, cookie }] : [];
   }
   if (!env.IG_SESSIONID) return [];
+  const bag = parseIgCookieEnv(env.IG_SESSIONID);
+  const sessionid = bag.sessionid || env.IG_SESSIONID;
+  if (!sessionid || sessionid.includes(";")) return [];
   return [
     {
       id: "env0",
-      label: "الجلسة الحالية",
+      label: "من Render",
       enabled: true,
-      ig: { sessionid: env.IG_SESSIONID, csrftoken: env.IG_CSRFTOKEN || undefined, dsUserId: env.IG_DS_USER_ID || undefined, mid: env.IG_MID || undefined, datr: env.IG_DATR || undefined },
+      ig: {
+        sessionid,
+        csrftoken: env.IG_CSRFTOKEN || bag.csrftoken || undefined,
+        dsUserId: env.IG_DS_USER_ID || bag.ds_user_id || undefined,
+        mid: env.IG_MID || bag.mid || undefined,
+        datr: env.IG_DATR || bag.datr || undefined,
+      },
     },
   ];
 }
 
 export const enabledEntries = (list: PoolEntry[] | null) => (list ?? []).filter((e) => e.enabled);
+
+
+function tokenOf(kind: PoolKind, e: PoolEntry): string {
+  if (kind === "instagram") return (e.ig?.sessionid ?? "").trim();
+  if (kind === "tiktok") {
+    const c = e.cookie ?? "";
+    const m = c.match(/(?:^|;\s*)sessionid=([^;]+)/i);
+    return (m ? m[1] : c).trim();
+  }
+  return (e.url ?? "").trim();
+}
+
+/**
+ * Stored pool (if saved) plus the Render env session when its token is not already in the list.
+ */
+export function mergedPool(secrets: Record<string, string>, kind: PoolKind, env: NodeJS.ProcessEnv = process.env): PoolEntry[] {
+  const stored = storedPool(secrets, kind);
+  const fromEnv = seedFromEnv(kind, env);
+  if (!stored) return fromEnv;
+  const have = new Set(stored.map((e) => tokenOf(kind, e)).filter(Boolean));
+  const extra = fromEnv.filter((e) => {
+    const t = tokenOf(kind, e);
+    return t && !have.has(t);
+  });
+  return extra.length ? [...stored, ...extra] : stored;
+}

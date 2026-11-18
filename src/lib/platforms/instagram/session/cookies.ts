@@ -6,6 +6,9 @@ import "server-only";
  */
 import { env } from "../../../env";
 import { parseIgCookieEnv } from "./cookie-env";
+import type { IgCookies } from "../../../pools/types";
+import { currentList } from "../../../pools/ops";
+import { snapshot } from "../../../site/snapshot";
 
 export const IG_WEB_APP_ID = "936619743392459";
 export const IG_DESKTOP_UA =
@@ -13,7 +16,14 @@ export const IG_DESKTOP_UA =
 export const IG_ANDROID_UA =
   "Instagram 309.1.0.41.113 Android (33/13; 420dpi; 1080x2340; samsung; SM-S911B; dm1q; qcom; en_US; 541635890)";
 
-export const hasSession = () => Boolean(env.igSessionId);
+export const hasSession = () => {
+  if (env.igSessionId) return true;
+  try {
+    return currentList(snapshot().secrets, "instagram").some((e) => e.enabled && !!e.ig?.sessionid);
+  } catch {
+    return false;
+  }
+};
 
 function bag() {
   return parseIgCookieEnv(process.env.IG_SESSIONID ?? "");
@@ -43,7 +53,20 @@ export function cookieHeader(): string {
 
 export type IgClient = "web-session" | "app-session" | "web-anon";
 
-export function igHeaders(client: IgClient, referer = "https://www.instagram.com/"): Record<string, string> {
+function cookieHeaderFrom(ig: IgCookies): string {
+  const ds = ig.dsUserId || decodeURIComponent(ig.sessionid).split(":")[0].replace(/\D/g, "");
+  const parts: [string, string][] = [
+    ["sessionid", ig.sessionid],
+    ["ds_user_id", ds],
+    ["csrftoken", ig.csrftoken || ""],
+    ["mid", ig.mid || ""],
+    ["datr", ig.datr || ""],
+    ["ig_nrcb", "1"],
+  ];
+  return parts.filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+export function igHeaders(client: IgClient, referer = "https://www.instagram.com/", ig?: IgCookies | null): Record<string, string> {
   const h: Record<string, string> = {
     accept: "*/*",
     "accept-language": "en-US,en;q=0.9",
@@ -59,9 +82,14 @@ export function igHeaders(client: IgClient, referer = "https://www.instagram.com
     "user-agent": client === "app-session" ? IG_ANDROID_UA : IG_DESKTOP_UA,
   };
   if (client === "app-session") h["x-ig-app-id"] = "567067343352427";
-  if (client !== "web-anon" && env.igSessionId) {
-    h.cookie = cookieHeader();
-    if (env.igCsrfToken) h["x-csrftoken"] = env.igCsrfToken;
+  if (client !== "web-anon") {
+    if (ig?.sessionid) {
+      h.cookie = cookieHeaderFrom(ig);
+      if (ig.csrftoken) h["x-csrftoken"] = ig.csrftoken;
+    } else if (env.igSessionId) {
+      h.cookie = cookieHeader();
+      if (env.igCsrfToken) h["x-csrftoken"] = env.igCsrfToken;
+    }
   }
   return h;
 }

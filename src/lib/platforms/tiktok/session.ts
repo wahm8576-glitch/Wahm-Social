@@ -3,6 +3,9 @@ import "server-only";
  * TikTok web session helpers. Cookie / session values are never logged or returned.
  */
 import { env } from "../../env";
+import { currentList } from "../../pools/ops";
+import { snapshot } from "../../site/snapshot";
+import { pickSession } from "../../pools/runtime";
 
 const CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -17,39 +20,47 @@ const ATTR = /^(domain|path|expires|max-age|secure|httponly|samesite)$/i;
  * ("name = value" / "name=value" lines with attribute lines underneath).
  * Duplicate names keep the LAST value (important for msToken).
  */
-export function tiktokCookieHeader(): string {
-  const raw = (env.tiktokCookie || "").trim().replace(/^Cookie:\s*/i, "");
-  if (raw) {
-    const map = new Map<string, string>();
-    if (raw.includes("\n")) {
-      for (const ln of raw.split(/\r?\n/)) {
-        const s = ln.trim();
-        if (!s || s.startsWith("#") || ATTR.test(s.split(/[=\s]/)[0] || "")) continue;
-        // "name = value" or "name=value" (ignore trailing "; attr=...")
-        const m = s.match(/^([A-Za-z0-9_.-]+)\s*=\s*([^;]*)$/);
-        if (m) {
-          map.set(m[1], m[2].trim());
-          continue;
-        }
-        // legacy "name value" (no equals)
-        const sp = s.match(/^([A-Za-z0-9_.-]+)\s+(\S.*)$/);
-        if (sp && !sp[2].startsWith("=")) map.set(sp[1], sp[2].trim());
+export function normalizeTikTokCookie(input: string): string {
+  const raw = input.trim().replace(/^Cookie:\s*/i, "");
+  if (!raw) return "";
+  const map = new Map<string, string>();
+  if (raw.includes("\n")) {
+    for (const ln of raw.split(/\r?\n/)) {
+      const s = ln.trim();
+      if (!s || s.startsWith("#") || ATTR.test(s.split(/[=\s]/)[0] || "")) continue;
+      const m = s.match(/^([A-Za-z0-9_.-]+)\s*=\s*([^;]*)$/);
+      if (m) {
+        map.set(m[1], m[2].trim());
+        continue;
       }
-      if (map.size) return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-    }
-    // Flat header: last-wins for duplicate names (e.g. two msToken=)
-    for (const part of raw.split(";")) {
-      const p = part.trim();
-      if (!p.includes("=")) continue;
-      const i = p.indexOf("=");
-      const name = p.slice(0, i).trim();
-      const val = p.slice(i + 1).trim();
-      if (!name || ATTR.test(name)) continue;
-      map.set(name, val);
+      const sp = s.match(/^([A-Za-z0-9_.-]+)\s+(\S.*)$/);
+      if (sp && !sp[2].startsWith("=")) map.set(sp[1], sp[2].trim());
     }
     if (map.size) return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
-    return raw;
   }
+  for (const part of raw.split(";")) {
+    const p = part.trim();
+    if (!p.includes("=")) continue;
+    const i = p.indexOf("=");
+    const name = p.slice(0, i).trim();
+    const val = p.slice(i + 1).trim();
+    if (!name || ATTR.test(name)) continue;
+    map.set(name, val);
+  }
+  if (map.size) return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  return raw;
+}
+
+export function tiktokCookieHeader(): string {
+  try {
+    const picked = pickSession("tiktok", currentList(snapshot().secrets, "tiktok"));
+    if (picked?.cookie) {
+      const v = normalizeTikTokCookie(picked.cookie);
+      if (v) return v;
+    }
+  } catch { /* fall through to env */ }
+  const fromEnv = normalizeTikTokCookie(env.tiktokCookie || "");
+  if (fromEnv) return fromEnv;
   if (env.tiktokSessionId) return `sessionid=${env.tiktokSessionId}`;
   return "";
 }

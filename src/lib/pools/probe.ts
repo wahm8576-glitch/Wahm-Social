@@ -154,6 +154,38 @@ export async function probeInstagram(f: F, cookie?: string, csrf?: string): Prom
   }
 }
 
+/** Who owns this Instagram session? Uses accounts/current_user — never logs cookie values. */
+export async function probeIgAccount(f: F, cookie: string, csrf?: string): Promise<ProbeLine & { username?: string }> {
+  const t0 = Date.now();
+  try {
+    const { res, text, ms } = await timed(f, "https://i.instagram.com/api/v1/accounts/current_user/", {
+      headers: {
+        "user-agent": "Instagram 309.1.0.41.113 Android (33/13; 420dpi; 1080x2340; samsung; SM-S911B; dm1q; qcom; en_US; 541635890)",
+        accept: "*/*",
+        "x-ig-app-id": "567067343352427",
+        "x-requested-with": "XMLHttpRequest",
+        cookie,
+        ...(csrf ? { "x-csrftoken": csrf } : {}),
+      },
+    });
+    let username = "";
+    if (text.trimStart().startsWith("{")) {
+      try {
+        const j = JSON.parse(text) as { user?: { username?: string }; status?: string; message?: string };
+        username = String(j?.user?.username ?? "").replace(/^@/, "");
+        const msg = String(j?.message ?? "");
+        if (!username) {
+          const login = /login_required|checkpoint|challenge/i.test(msg);
+          return { target: "حساب الجلسة", verdict: login ? "blocked" : "warn", status: res.status, ms, note: login ? "منتهية / checkpoint" : (msg || "بدون اسم").slice(0, 60) };
+        }
+      } catch { /* ignore */ }
+    }
+    return { target: "حساب الجلسة", verdict: username ? "ok" : res.status === 429 ? "blocked" : "warn", status: res.status, ms, note: username ? `@${username}` : res.status === 429 ? "حد طلبات 429" : "تعذر قراءة الحساب", username: username || undefined };
+  } catch (e) {
+    return errLine("حساب الجلسة", e, t0);
+  }
+}
+
 const ICON: Record<Verdict, string> = { ok: "✅", blocked: "⛔", error: "❌", warn: "⚠️" };
 export function formatLines(title: string, lines: ProbeLine[]): string {
   return [title, ...lines.map((l) => `• ${l.target}: ${l.status ? `HTTP ${l.status} ` : ""}${ICON[l.verdict]}${l.note ? ` ${l.note}` : ""} (${(l.ms / 1000).toFixed(1)}s)`)].join("\n");

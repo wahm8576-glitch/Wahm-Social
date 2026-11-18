@@ -1,11 +1,11 @@
 /** Pure list operations on a pool inside the secrets bag (used inside saveSecrets). */
-import { seedFromEnv, storedPool } from "./read";
+import { mergedPool } from "./read";
 import { poolSecretKey, type PoolEntry, type PoolKind } from "./types";
 
 export const MAX_ENTRIES = 25;
 
 export function currentList(secrets: Record<string, string>, kind: PoolKind, env: NodeJS.ProcessEnv = process.env): PoolEntry[] {
-  return storedPool(secrets, kind) ?? seedFromEnv(kind, env);
+  return mergedPool(secrets, kind, env);
 }
 
 export function writeList(secrets: Record<string, string>, kind: PoolKind, list: PoolEntry[]) {

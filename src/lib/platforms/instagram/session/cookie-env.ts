@@ -1,6 +1,6 @@
 /**
- * Parse IG_SESSIONID whether it is a bare session token or a pasted cookie header.
- * Never log the values.
+ * Parse IG_SESSIONID whether it is a bare session token, a Cookie header,
+ * or a Netscape-style export. Never log the values.
  */
 export interface IgCookieBag {
   sessionid: string;
@@ -13,47 +13,61 @@ export interface IgCookieBag {
   wd?: string;
 }
 
+const ATTR = /^(domain|path|expires|max-age|secure|httponly|samesite|priority|size)$/i;
+
 /** Strip wrapping quotes / leftover JSON braces from a pasted env value. */
 export function stripCookieJunk(raw: string): string {
-  let s = raw.trim();
+  let s = raw.trim().replace(/^Cookie:\s*/i, "");
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) s = s.slice(1, -1).trim();
-  // Pasted JSON fragments sometimes leave trailing `"}}` or `"}]` after the last cookie.
   s = s.replace(/["}\]]+$/g, "").trim();
   return s;
 }
 
+function setKey(bag: IgCookieBag, key: string, val: string) {
+  const k = key.trim().toLowerCase();
+  const v = val.trim();
+  if (!k || !v || ATTR.test(k)) return;
+  if (k === "sessionid") bag.sessionid = v;
+  else if (k === "ds_user_id") bag.ds_user_id = v;
+  else if (k === "csrftoken") bag.csrftoken = v;
+  else if (k === "mid") bag.mid = v;
+  else if (k === "datr") bag.datr = v;
+  else if (k === "ig_did") bag.ig_did = v;
+  else if (k === "rur") bag.rur = v;
+  else if (k === "wd") bag.wd = v.replace(/["}\]]+$/g, "");
+}
+
 export function parseIgCookieEnv(raw: string): IgCookieBag {
   const s = stripCookieJunk(raw);
-  if (!s) return { sessionid: "" };
-  if (!s.includes(";")) return { sessionid: s.trim() };
-
   const bag: IgCookieBag = { sessionid: "" };
-  const parts = s.split(";").map((p) => p.trim()).filter(Boolean);
+  if (!s) return bag;
+  // Bare token (no separators).
+  if (!/[;=\n]/.test(s)) {
+    bag.sessionid = s.trim();
+    return bag;
+  }
+  const parts = s.split(/[;\n\r]+/).map((p) => p.trim()).filter(Boolean);
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
+    if (p.startsWith("#")) continue;
     if (!p.includes("=")) {
-      if (i === 0 && !bag.sessionid) bag.sessionid = p;
+      if (i === 0 && !bag.sessionid && !/\s/.test(p)) bag.sessionid = p;
       continue;
     }
-    const eq = p.indexOf("=");
-    const key = p.slice(0, eq).trim().toLowerCase();
-    const val = p.slice(eq + 1).trim();
-    if (!val) continue;
-    if (key === "sessionid") bag.sessionid = val;
-    else if (key === "ds_user_id") bag.ds_user_id = val;
-    else if (key === "csrftoken") bag.csrftoken = val;
-    else if (key === "mid") bag.mid = val;
-    else if (key === "datr") bag.datr = val;
-    else if (key === "ig_did") bag.ig_did = val;
-    else if (key === "rur") bag.rur = val;
-    else if (key === "wd") bag.wd = val;
-    else if (i === 0 && !bag.sessionid && key !== "sessionid") {
-      /* first segment with an unexpected key: ignore */
-    }
+    const m = p.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/);
+    if (!m) continue;
+    setKey(bag, m[1], m[2].replace(/;.*$/, "").trim());
   }
   return bag;
 }
 
 export function igSessionToken(raw: string): string {
   return parseIgCookieEnv(raw).sessionid;
+}
+
+/** Safe log tag: label + last 4 characters of the session token only. */
+export function sessionTag(label: string | undefined, token: string | undefined, id?: string): string {
+  const t = (token ?? "").replace(/[^A-Za-z0-9]/g, "");
+  const last = t.slice(-4) || "????";
+  return `${label || id || "session"} …${last}`;
 }

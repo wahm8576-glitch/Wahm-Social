@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, mergeSettings } from "./defaults";
 import { applyOverrides } from "./apply";
 import { setSnapshot, snapshot } from "./snapshot";
 import type { SiteSettings } from "./types";
+import { hydrateHealthFromFirestore, hydratePoolsFromFirestore, persistHealthToFirestore, persistPoolsToFirestore } from "../pools/persist";
 
 const TTL_MS = 45_000;
 const g = globalThis as unknown as { __frostlySiteLoad?: Promise<void> | null; __frostlyLoadOk?: boolean };
@@ -28,6 +29,12 @@ async function load(): Promise<void> {
     } catch (e) {
       error = (e as Error).message;
     }
+    try {
+      if (await hydratePoolsFromFirestore(sec)) {
+        /* pools recovered from Firestore when the data repo copy was empty */
+      }
+      await hydrateHealthFromFirestore();
+    } catch { /* optional */ }
     applyOverrides(s, sec);
     setSnapshot({ settings: s, secrets: sec, loadedAt: Date.now(), error });
     g.__frostlyLoadOk = true;
@@ -68,6 +75,8 @@ async function persist(settings: SiteSettings, secrets: Record<string, string>, 
   await dataStore().write(files, message);
   applyOverrides(settings, secrets);
   setSnapshot({ settings, secrets, loadedAt: Date.now(), error: "" });
+  void persistPoolsToFirestore(secrets);
+  void persistHealthToFirestore();
 }
 
 /** Fresh copy straight from storage before a write (avoid clobbering a concurrent edit). */

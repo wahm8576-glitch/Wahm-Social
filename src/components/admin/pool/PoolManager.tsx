@@ -3,7 +3,7 @@ import { Section } from "../Section";
 import { PoolRow } from "./PoolRow";
 import { AddForm } from "./AddForm";
 import { snapshot } from "@/lib/site/snapshot";
-import { storedPool, seedFromEnv } from "@/lib/pools/read";
+import { storedPool, mergedPool } from "@/lib/pools/read";
 import { lastTest } from "@/lib/pools/test";
 import { activeIndex } from "@/lib/pools/rotate";
 import { activeProxyIndex } from "@/lib/server/http";
@@ -19,7 +19,7 @@ function activeEnabledPosition(kind: PoolKind, enabledCount: number): number {
 /** Ordered list UI for a pool: rows + add form + "test all". Failover order = list order. */
 export function PoolManager({ kind, base, title, desc }: { kind: PoolKind; base: string; title: string; desc: string }) {
   const stored = storedPool(snapshot().secrets, kind);
-  const list = stored ?? seedFromEnv(kind);
+  const list = mergedPool(snapshot().secrets, kind);
   const action = `${base}/api/pool?kind=${kind}`;
   const enabled = list.filter((e) => e.enabled);
   const activeId = enabled[activeEnabledPosition(kind, enabled.length)]?.id;
@@ -43,7 +43,7 @@ export function PoolManager({ kind, base, title, desc }: { kind: PoolKind; base:
         <div className="min-w-0 flex-1">
           <AddForm kind={kind} action={action} />
         </div>
-        {list.length > 1 && (
+        {list.length > 0 && (
           <form method="post" action={action}>
             <input type="hidden" name="op" value="testall" />
             <button className="btn-ghost">🧪 اختبار الكل</button>

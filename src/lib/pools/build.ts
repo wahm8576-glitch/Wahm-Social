@@ -2,17 +2,10 @@
 import { newId } from "./ops";
 import { normalizeProxyLine, validateProxy, validateRelay } from "./validate";
 import type { IgCookies, PoolEntry, PoolKind } from "./types";
+import { parseIgCookieEnv } from "../platforms/instagram/session/cookie-env";
 
 const str = (f: FormData, k: string, max = 20_000) => String(f.get(k) ?? "").slice(0, max).trim();
 
-function igFromCookieHeader(raw: string): Partial<IgCookies> {
-  const map = new Map<string, string>();
-  for (const part of raw.replace(/^Cookie:\s*/i, "").split(/;|\n/)) {
-    const i = part.indexOf("=");
-    if (i > 0) map.set(part.slice(0, i).trim(), part.slice(i + 1).trim());
-  }
-  return { sessionid: map.get("sessionid"), csrftoken: map.get("csrftoken"), dsUserId: map.get("ds_user_id"), mid: map.get("mid"), datr: map.get("datr") };
-}
 
 export function buildEntries(kind: PoolKind, f: FormData): PoolEntry[] {
   const label = str(f, "label", 60);
@@ -37,14 +30,15 @@ export function buildEntries(kind: PoolKind, f: FormData): PoolEntry[] {
     if (!cookie.includes("=") && !/^[A-Za-z0-9]{16,}$/.test(cookie)) throw new Error("الصق سطر الكوكيز كامل (فيه sessionid=…)");
     return [{ ...base(0, 1), cookie: cookie.includes("=") ? cookie : `sessionid=${cookie}` }];
   }
-  const fromHeader = igFromCookieHeader(str(f, "cookie"));
+  const pasted = str(f, "cookie") || str(f, "sessionid", 2000);
+  const bag = parseIgCookieEnv(pasted);
   const ig: IgCookies = {
-    sessionid: str(f, "sessionid", 600) || fromHeader.sessionid || "",
-    csrftoken: str(f, "csrftoken", 200) || fromHeader.csrftoken || undefined,
-    dsUserId: str(f, "dsUserId", 40) || fromHeader.dsUserId || undefined,
-    mid: str(f, "mid", 200) || fromHeader.mid || undefined,
-    datr: str(f, "datr", 200) || fromHeader.datr || undefined,
+    sessionid: bag.sessionid || str(f, "sessionid", 600),
+    csrftoken: str(f, "csrftoken", 200) || bag.csrftoken || undefined,
+    dsUserId: str(f, "dsUserId", 40) || bag.ds_user_id || undefined,
+    mid: str(f, "mid", 200) || bag.mid || undefined,
+    datr: str(f, "datr", 200) || bag.datr || undefined,
   };
-  if (!ig.sessionid) throw new Error("sessionid مطلوب (أو الصق سطر الكوكيز كامل)");
+  if (!ig.sessionid) throw new Error("sessionid مطلوب (أو الصق سطر الكوكيز كامل أو التوكن وحده)");
   return [{ ...base(0, 1), ig }];
 }

@@ -1,6 +1,7 @@
 /** Write pools onto process.env (SCRAPER_PROXY, RELAY_URL, TIKTOK_COOKIE, IG_*). Called from applyOverrides. */
-import { enabledEntries, storedPool } from "./read";
+import { enabledEntries, storedPool, mergedPool } from "./read";
 import { activeIndex, advance } from "./rotate";
+import { pickSession } from "./runtime";
 import type { PoolKind } from "./types";
 
 const setEnv = (k: string, v: string | undefined) => {
@@ -18,7 +19,7 @@ export function applyPools(secrets: Record<string, string>) {
   const tt = storedPool(secrets, "tiktok");
   if (tt) {
     const on = enabledEntries(tt);
-    const cur = on[activeIndex("tiktok", on.length)];
+    const cur = pickSession("tiktok", on) ?? on[activeIndex("tiktok", on.length)];
     setEnv("TIKTOK_COOKIE", cur?.cookie);
     if (!cur) setEnv("TIKTOK_SESSIONID", undefined);
   }
@@ -26,7 +27,7 @@ export function applyPools(secrets: Record<string, string>) {
   const ig = storedPool(secrets, "instagram");
   if (ig) {
     const on = enabledEntries(ig);
-    const c = on[activeIndex("instagram", on.length)]?.ig;
+    const c = (pickSession("instagram", on) ?? on[activeIndex("instagram", on.length)])?.ig;
     setEnv("IG_SESSIONID", c?.sessionid);
     setEnv("IG_CSRFTOKEN", c?.csrftoken);
     setEnv("IG_DS_USER_ID", c?.dsUserId);
@@ -49,6 +50,6 @@ export function rotateSession(kind: Extract<PoolKind, "tiktok" | "instagram">, r
 }
 
 export function activeSessionNumber(kind: Extract<PoolKind, "tiktok" | "instagram">): { active: number; total: number } {
-  const on = enabledEntries(storedPool(g.__frostlySite?.secrets ?? {}, kind));
+  const on = enabledEntries(mergedPool(g.__frostlySite?.secrets ?? {}, kind));
   return { active: on.length ? activeIndex(kind, on.length) + 1 : 0, total: on.length };
 }
