@@ -71,6 +71,20 @@ export const env = {
   get dataDir() {
     return read("DATA_DIR", "./data");
   },
+  /** Brevo transactional API key (server only). Never log this value. */
+  get brevoApiKey() {
+    return read("BREVO_API_KEY");
+  },
+  get brevoSenderEmail() {
+    return read("BREVO_SENDER_EMAIL");
+  },
+  get brevoSenderName() {
+    return read("BREVO_SENDER_NAME", "Frostly | فروستلي");
+  },
+  /** True on Render (all plans). Outbound SMTP is blocked on the free instance. */
+  get onRender() {
+    return Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+  },
   isProd: process.env.NODE_ENV === "production",
 };
 

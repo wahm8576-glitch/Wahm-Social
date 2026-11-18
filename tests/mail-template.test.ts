@@ -135,3 +135,21 @@ test("smtpConnectAttempts tries Gmail 587 then 465, or 465 then 587 if already o
   assert.equal(other.length, 1);
   assert.equal(other[0].host, "smtp.example.com");
 });
+
+import { buildBrevoPayload } from "../src/lib/mail/brevo-payload";
+
+test("buildBrevoPayload has sender, html, text, and no API key field", () => {
+  const body = buildBrevoPayload(
+    { to: "user@example.com", subject: "إعادة تعيين كلمة المرور – Frostly", text: "plain", html: "<p>hi</p>" },
+    "wahmsec@gmail.com",
+    'Frostly | فروستلي"',
+  );
+  assert.equal(body.sender.email, "wahmsec@gmail.com");
+  assert.equal(body.sender.name, "Frostly | فروستلي");
+  assert.equal(body.to[0].email, "user@example.com");
+  assert.equal(body.htmlContent, "<p>hi</p>");
+  assert.equal(body.textContent, "plain");
+  assert.ok(!("api-key" in body));
+  assert.ok(!("apiKey" in body));
+  assert.doesNotMatch(JSON.stringify(body), /xkeysib/i);
+});

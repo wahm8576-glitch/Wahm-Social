@@ -1,9 +1,11 @@
 /**
- * "Forgot password": always answers the same way (never reveals whether an email is registered).
+ * "Forgot password": always the same JSON (never reveals whether an email is registered).
  * Rate limited per IP and per email.
- * Prefers a branded SMTP mail with our /reset-password?oobCode= link. If SMTP is not
- * configured or the send fails, falls back to Firebase's own email (accounts:sendOobCode).
- * Legacy (Firebase off) still signs a 30-minute token and uses the branded template.
+ *
+ * If a Firebase (or legacy site) user exists: send a branded Frostly mail
+ * (Brevo HTTPS first, then SMTP — skipped quickly on Render — then throw).
+ * If branded send fails, fall back to Firebase's own oob email.
+ * If no user is found: skip branded mail (enumeration-safe) and still call Firebase oob.
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -12,8 +14,9 @@ import { burstGuard } from "@/lib/server/guard";
 import { handler } from "@/lib/server/respond";
 import { clientIp, rateLimit } from "@/lib/server/rateLimit";
 import { signResetToken, RESET_TTL_MIN } from "@/lib/server/passwordReset";
-import { sendMail, smtpFromAddress } from "@/lib/mail/send";
-import { smtpDiag, smtpReady } from "@/lib/mail/config";
+import { brandedTransportReady, deliverBrandedMail } from "@/lib/mail/deliver";
+import { brevoDiag, brevoReady } from "@/lib/mail/brevo";
+import { smtpDiag } from "@/lib/mail/config";
 import { brandedActionEmail } from "@/lib/mail/templates";
 import { publicOrigin } from "@/lib/admin/guard";
 import { env } from "@/lib/env";
@@ -48,15 +51,18 @@ async function sendBrandedReset(opts: {
     expiryNote: opts.expiryNote,
     enLine: opts.enLine,
   });
-  const r = await sendMail(
-    { to: opts.to, subject: mail.subject, text: mail.text, html: mail.html, fromName: mail.fromName },
-    undefined,
-    { connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000 },
-  );
-  console.info(`[mail] password-reset path=smtp from=${r.fromAddress || smtpFromAddress()}`);
+  const r = await deliverBrandedMail({
+    to: opts.to,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+    fromName: mail.fromName,
+  });
+  console.info(`[mail] password-reset path=${r.path} result=sent messageId=${r.messageId || "none"}`);
 }
 
-async function sendSmtpFirebaseReset(email: string, origin: string): Promise<boolean> {
+/** Look up Firebase Auth first so a registered Firebase user always gets branded mail. */
+async function sendBrandedForRegisteredUser(email: string, origin: string): Promise<boolean> {
   const siteUser = Users.byEmail(email);
   let fb = await firebaseUserByEmail(email);
   if (!fb && siteUser) {
@@ -73,8 +79,8 @@ async function sendSmtpFirebaseReset(email: string, origin: string): Promise<boo
 }
 
 async function fallbackFirebaseOob(email: string, origin: string, reason: string) {
-  console.error(`[mail] smtp failed (${smtpDiag()}): ${scrub(reason)}; fallback=firebase-oob`);
-  logError("mail", `smtp failed (${smtpDiag()}): ${scrub(reason)}; fallback=firebase-oob`);
+  console.error(`[mail] branded failed (${brevoDiag()}; ${smtpDiag()}): ${scrub(reason)}; fallback=firebase-oob`);
+  logError("mail", `branded failed: ${scrub(reason)}; fallback=firebase-oob`);
   void ensureFirebaseEmailTemplates(origin);
   const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
   console.info(`[mail] password-reset path=firebase-oob result=${result}`);
@@ -98,7 +104,6 @@ async function sendLegacyReset(email: string, origin: string) {
 
 export const POST = handler(async (req: Request) => {
   burstGuard(req, "auth", 10);
-  // Always re-read secrets so a just-updated SMTP app password is used.
   await refreshSettings();
   await getSettings();
   const ip = clientIp(req);
@@ -117,24 +122,22 @@ export const POST = handler(async (req: Request) => {
   const origin = originOf(req);
   try {
     if (!firebaseEnabled()) {
-      if (smtpReady()) await sendLegacyReset(email, origin);
-      else console.error(`[mail] password-reset skipped: Firebase off and SMTP not ready (${smtpDiag()})`);
-    } else if (smtpReady()) {
+      if (brandedTransportReady()) await sendLegacyReset(email, origin);
+      else console.error(`[mail] password-reset skipped: Firebase off and no Brevo/SMTP (${brevoDiag()}; ${smtpDiag()})`);
+    } else if (brandedTransportReady()) {
       try {
-        const sent = await sendSmtpFirebaseReset(email, origin);
+        const sent = await sendBrandedForRegisteredUser(email, origin);
         if (!sent) {
-          // SMTP is configured, but we have no Firebase/site user to build a branded link for.
-          console.error(`[mail] smtp skipped (ready, no local firebase/site user); fallback=firebase-oob`);
+          console.info(`[mail] branded skipped (no firebase/site user); fallback=firebase-oob`);
           void ensureFirebaseEmailTemplates(origin);
           const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
           console.info(`[mail] password-reset path=firebase-oob result=${result}`);
         }
       } catch (e) {
-        const msg = scrub(String((e as Error)?.message ?? e));
-        await fallbackFirebaseOob(email, origin, msg);
+        await fallbackFirebaseOob(email, origin, String((e as Error)?.message ?? e));
       }
     } else {
-      console.error(`[mail] smtp not configured (${smtpDiag()}); fallback=firebase-oob`);
+      console.error(`[mail] no branded transport (${brevoDiag()}; ${smtpDiag()}); fallback=firebase-oob`);
       void ensureFirebaseEmailTemplates(origin);
       const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
       console.info(`[mail] password-reset path=firebase-oob result=${result}`);
