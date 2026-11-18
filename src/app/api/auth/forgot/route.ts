@@ -122,6 +122,7 @@ export const POST = handler(async (req: Request) => {
         const sent = await sendSmtpFirebaseReset(email, origin);
         if (!sent) {
           // No local record — still try Firebase so we don't miss a Firebase-only account.
+          void ensureFirebaseEmailTemplates(origin);
           const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
           console.info(`[mail] password-reset path=firebase-oob result=${result}`);
         }
