@@ -49,3 +49,14 @@ export function smtpPublic(c = readSmtp()) {
   const { pass, ...rest } = c;
   return { ...rest, hasPass: Boolean(pass), passLen: pass.length };
 }
+
+/** For Gmail, try the configured port first, then the other of 587 (STARTTLS) / 465 (SSL). Other hosts: as configured. */
+export function smtpConnectAttempts(cfg: SmtpConfig): SmtpConfig[] {
+  const host = String(cfg.host || "").trim().toLowerCase().replace(/^.*@/, "").split("/")[0];
+  const gmail = host === "smtp.gmail.com" || host === "smtp.googlemail.com";
+  if (!gmail) return [cfg];
+  const starttls: SmtpConfig = { ...cfg, host: "smtp.gmail.com", port: 587, secure: false };
+  const implicit: SmtpConfig = { ...cfg, host: "smtp.gmail.com", port: 465, secure: true };
+  if (cfg.port === 465 || (cfg.secure && cfg.port !== 587)) return [implicit, starttls];
+  return [starttls, implicit];
+}

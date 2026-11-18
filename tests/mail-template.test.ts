@@ -113,3 +113,25 @@ test("smtpDiag never includes the password", () => {
   assert.doesNotMatch(line, /super-secret/);
   assert.doesNotMatch(line, /app-password/);
 });
+
+import { smtpConnectAttempts } from "../src/lib/mail/config";
+
+test("smtpConnectAttempts tries Gmail 587 then 465, or 465 then 587 if already on 465", () => {
+  const base = smtp();
+  const a = smtpConnectAttempts({ ...base, host: "smtp.gmail.com", port: 587, secure: false });
+  assert.deepEqual(
+    a.map((c) => ({ host: c.host, port: c.port, secure: c.secure })),
+    [
+      { host: "smtp.gmail.com", port: 587, secure: false },
+      { host: "smtp.gmail.com", port: 465, secure: true },
+    ],
+  );
+  const b = smtpConnectAttempts({ ...base, host: "smtp.gmail.com", port: 465, secure: true });
+  assert.equal(b[0].port, 465);
+  assert.equal(b[0].secure, true);
+  assert.equal(b[1].port, 587);
+  assert.equal(b[1].secure, false);
+  const other = smtpConnectAttempts({ ...base, host: "smtp.example.com", port: 587, secure: false });
+  assert.equal(other.length, 1);
+  assert.equal(other[0].host, "smtp.example.com");
+});

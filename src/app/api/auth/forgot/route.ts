@@ -17,7 +17,7 @@ import { smtpDiag, smtpReady } from "@/lib/mail/config";
 import { brandedActionEmail } from "@/lib/mail/templates";
 import { publicOrigin } from "@/lib/admin/guard";
 import { env } from "@/lib/env";
-import { getSettings } from "@/lib/site/store";
+import { getSettings, refreshSettings } from "@/lib/site/store";
 import { firebaseEnabled } from "@/lib/firebase/config";
 import { adminAuth, createFirebaseUser, firebaseUserByEmail } from "@/lib/firebase/admin";
 import { extractOobCode, greetingName, siteResetUrl } from "@/lib/firebase/links";
@@ -98,6 +98,8 @@ async function sendLegacyReset(email: string, origin: string) {
 
 export const POST = handler(async (req: Request) => {
   burstGuard(req, "auth", 10);
+  // Always re-read secrets so a just-updated SMTP app password is used.
+  await refreshSettings();
   await getSettings();
   const ip = clientIp(req);
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
@@ -121,7 +123,8 @@ export const POST = handler(async (req: Request) => {
       try {
         const sent = await sendSmtpFirebaseReset(email, origin);
         if (!sent) {
-          // No local record — still try Firebase so we don't miss a Firebase-only account.
+          // SMTP is configured, but we have no Firebase/site user to build a branded link for.
+          console.error(`[mail] smtp skipped (ready, no local firebase/site user); fallback=firebase-oob`);
           void ensureFirebaseEmailTemplates(origin);
           const result = await sendFirebaseOobEmail(email, "PASSWORD_RESET", `${origin}/reset-password`);
           console.info(`[mail] password-reset path=firebase-oob result=${result}`);
