@@ -1,0 +1,84 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { extractOobCode, greetingName, siteResetUrl, siteVerifyUrl } from "../src/lib/firebase/links";
+import { escapeHtml } from "../src/lib/mail/escape";
+import { BRAND_FROM_NAME, RESET_SUBJECT, VERIFY_SUBJECT, brandedActionEmail, logoUrl } from "../src/lib/mail/templates";
+import { passwordStrength } from "../src/lib/auth/passwordStrength";
+
+test("extractOobCode reads Firebase action URLs and rejects junk", () => {
+  const link =
+    "https://frostly-53686.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=ABCDEFghijk0123456789&apiKey=x&lang=ar";
+  assert.equal(extractOobCode(link), "ABCDEFghijk0123456789");
+  assert.equal(extractOobCode("https://example.com/?oobCode=short"), null);
+  assert.equal(extractOobCode("not a url"), null);
+  assert.equal(extractOobCode("https://example.com/"), null);
+});
+
+test("greetingName prefers display name, then email local-part", () => {
+  assert.equal(greetingName("وهاب أحمد", "x@example.com"), "وهاب أحمد");
+  assert.equal(greetingName("  ", "wahm3401@gmail.com"), "wahm3401");
+  assert.equal(greetingName(null, "user@site"), "user");
+  assert.equal(greetingName(undefined, ""), "ضيفنا");
+});
+
+test("site reset / verify URLs encode the oob code", () => {
+  assert.equal(
+    siteResetUrl("https://wahm-social.onrender.com/", "abc+def"),
+    "https://wahm-social.onrender.com/reset-password?oobCode=abc%2Bdef",
+  );
+  assert.equal(siteVerifyUrl("https://wahm-social.onrender.com", "xyz"), "https://wahm-social.onrender.com/verify-email?oobCode=xyz");
+});
+
+test("escapeHtml prevents XSS in names", () => {
+  assert.equal(escapeHtml(`<img src=x onerror="alert(1)"> & '"`), "&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &#39;&quot;");
+});
+
+test("branded reset email has official copy, logo, button, expiry, and text alternative", () => {
+  const mail = brandedActionEmail({
+    kind: "reset",
+    displayName: `<script>xss</script>`,
+    link: "https://wahm-social.onrender.com/reset-password?oobCode=TESTCODE99",
+    origin: "https://wahm-social.onrender.com",
+    year: 2026,
+  });
+  assert.equal(mail.fromName, BRAND_FROM_NAME);
+  assert.equal(mail.subject, RESET_SUBJECT);
+  assert.match(mail.html, /dir="rtl"/);
+  assert.match(mail.html, /مرحباً &lt;script&gt;xss&lt;\/script&gt;/);
+  assert.doesNotMatch(mail.html, /<script>xss<\/script>/);
+  assert.match(mail.html, /تعيين كلمة مرور جديدة/);
+  assert.match(mail.html, /صالح لمدة ساعة واحدة/);
+  assert.match(mail.html, /إذا لم تطلب/);
+  assert.match(mail.html, /Frostly \| فروستلي/);
+  assert.match(mail.html, /© 2026 Frostly/);
+  assert.match(mail.html, /frostly-email-banner\.png/);
+  assert.equal(logoUrl("https://wahm-social.onrender.com/"), "https://wahm-social.onrender.com/frostly-email-banner.png");
+  assert.match(mail.html, /https:\/\/wahm-social\.onrender\.com\/reset-password\?oobCode=TESTCODE99/);
+  assert.match(mail.html, /prefers-color-scheme:\s*dark/);
+  assert.match(mail.html, /If you didn’t request this/i);
+  assert.match(mail.text, /مرحباً <script>xss<\/script>/);
+  assert.match(mail.text, /https:\/\/wahm-social\.onrender\.com\/reset-password\?oobCode=TESTCODE99/);
+  assert.match(mail.text, /We received a request to reset your Frostly password/);
+  assert.doesNotMatch(mail.html + mail.text, /firebaseapp\.com/);
+});
+
+test("branded verification email uses the verify subject and button", () => {
+  const mail = brandedActionEmail({
+    kind: "verify",
+    displayName: "وهاب",
+    link: "https://wahm-social.onrender.com/verify-email?oobCode=VCODE1234",
+    origin: "https://wahm-social.onrender.com",
+  });
+  assert.equal(mail.subject, VERIFY_SUBJECT);
+  assert.match(mail.html, /مرحباً وهاب/);
+  assert.match(mail.html, /تأكيد البريد الإلكتروني/);
+  assert.match(mail.text, /confirm your email/i);
+});
+
+test("passwordStrength scores short, mixed, and strong passwords", () => {
+  assert.equal(passwordStrength("abc").score, 1);
+  assert.ok(passwordStrength("abc").hints.includes("min8"));
+  assert.equal(passwordStrength("abcdefgh").score, 1);
+  assert.ok(passwordStrength("Abcdefgh1!").score >= 3);
+  assert.equal(passwordStrength("Abcdefghijkl1!").score, 4);
+});

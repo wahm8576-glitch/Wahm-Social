@@ -65,7 +65,10 @@ const AR: Record<string, string> = {
   "auth/account-exists-with-different-credential": "هذا البريد مسجّل بكلمة مرور. اكتب كلمة المرور بالأسفل لربط Google بنفس الحساب.",
   "auth/credential-already-in-use": "حساب Google هذا مربوط بحساب ثاني.",
   "auth/user-disabled": "هذا الحساب موقوف.",
+  "auth/expired-action-code": "انتهت صلاحية هذا الرابط. اطلب رابطاً جديداً.",
+  "auth/invalid-action-code": "هذا الرابط غير صالح أو سبق استخدامه. اطلب رابطاً جديداً.",
 };
+
 
 export const fbErrorCode = (e: unknown) => String((e as { code?: string })?.code ?? "");
 export const fbMessage = (e: unknown) => AR[fbErrorCode(e)] ?? "صار خطأ، جرّب مرة ثانية.";

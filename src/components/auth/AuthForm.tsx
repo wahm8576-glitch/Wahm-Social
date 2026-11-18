@@ -60,7 +60,6 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
         if (form.password.length < 8) throw Object.assign(new Error(), { code: "auth/weak-password" });
         cred = await fa.createUserWithEmailAndPassword(auth, email, form.password);
         if (form.name) await fa.updateProfile(cred.user, { displayName: form.name }).catch(() => {});
-        await fa.sendEmailVerification(cred.user, { url: `${location.origin}/login` }).catch(() => {});
       } else {
         try {
           cred = await fa.signInWithEmailAndPassword(auth, email, form.password);
@@ -83,6 +82,9 @@ export function AuthForm({ mode, firebase }: { mode: "login" | "register"; fireb
       }
       const r = await exchange(auth, cred, form.name);
       if (!r.ok) return setErr(r.message ?? t.auth.error);
+      if (mode === "register") {
+        await fetch("/api/auth/firebase/send-verification", { method: "POST" }).catch(() => {});
+      }
       done();
     } catch (e) {
       setErr(fbMessage(e));
