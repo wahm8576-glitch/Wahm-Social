@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import { env } from "../env";
 import type { Platform } from "../platforms/types";
 import type { PlanId } from "../plans";
+import { applyRedeemToState, type ActivationBatch, type ActivationCode } from "../billing/codes";
 import { Mirror, mergeRows, normEmail, type CollName, type MirrorSpec, type RemoteBackend } from "./mirror";
 
 export interface User {
@@ -62,7 +63,8 @@ export interface Payment {
   interval: "month" | "year" | "custom";
   amount: number;
   currency: string;
-  provider: "mock" | "stripe" | "paypal" | "admin" | "telegram_stars";
+  provider: "mock" | "stripe" | "paypal" | "admin" | "telegram_stars" | "code";
+  batchLabel?: string;
   status: "paid" | "pending" | "failed" | "refunded";
   createdAt: number;
   eventId?: string;
@@ -83,9 +85,11 @@ interface Schema {
   searches: SearchLog[];
   payments: Payment[];
   billingEvents: BillingEvent[];
+  activationBatches: ActivationBatch[];
+  activationCodes: ActivationCode[];
 }
 
-const empty = (): Schema => ({ users: [], watchlist: [], usage: [], searches: [], payments: [], billingEvents: [] });
+const empty = (): Schema => ({ users: [], watchlist: [], usage: [], searches: [], payments: [], billingEvents: [], activationBatches: [], activationCodes: [] });
 
 class JsonStore {
   private data: Schema;
@@ -141,6 +145,8 @@ class JsonStore {
           billingEvents: (e) => String(e.id),
           usage: (u) => String(u.key),
           searches: (x) => `${x.platform}:${x.username}:${x.at}`,
+          activationBatches: (b) => String(b.id),
+          activationCodes: (c) => String(c.hash || c.id),
         };
         for (const k of Object.keys(idOf) as CollName[]) {
           const rem = (remote[k] ?? []) as any[];
@@ -180,7 +186,7 @@ class JsonStore {
   flushRemote(all: boolean): Promise<unknown> {
     if (!this.mirror || !this.remoteReady) return Promise.resolve();
     const low = all || Date.now() - this.lastLowFlush > 60_000;
-    const colls: CollName[] = low ? ["users", "watchlist", "payments", "billingEvents", "usage", "searches"] : ["users", "watchlist", "payments", "billingEvents"];
+    const colls: CollName[] = low ? ["users", "watchlist", "payments", "billingEvents", "activationBatches", "activationCodes", "usage", "searches"] : ["users", "watchlist", "payments", "billingEvents", "activationBatches", "activationCodes"];
     if (low) this.lastLowFlush = Date.now();
     this.flushing = this.flushing
       .then(() => this.mirror!.flush(this.data as any, colls))
@@ -346,3 +352,70 @@ export const BillingEvents = {
     });
   },
 };
+
+export const ActivationBatches = {
+  all: () => db.get("activationBatches"),
+  byId: (id: string) => db.get("activationBatches").find((b) => b.id === id),
+  add(batch: ActivationBatch) {
+    db.mutate((d) => d.activationBatches.unshift(batch));
+    return batch;
+  },
+  update(id: string, patch: Partial<ActivationBatch>) {
+    return db.mutate((d) => {
+      const b = d.activationBatches.find((x) => x.id === id);
+      if (b) Object.assign(b, patch);
+      return b;
+    });
+  },
+};
+
+export const ActivationCodes = {
+  all: () => db.get("activationCodes"),
+  byHash: (hash: string) => db.get("activationCodes").find((c) => c.hash === hash),
+  byId: (id: string) => db.get("activationCodes").find((c) => c.id === id),
+  forBatch: (batchId: string) => db.get("activationCodes").filter((c) => c.batchId === batchId),
+  byLast4: (last4: string) => {
+    const q = last4.trim().toUpperCase();
+    return db.get("activationCodes").filter((c) => c.last4 === q);
+  },
+  byEmail: (email: string) => {
+    const q = email.trim().toLowerCase();
+    return db.get("activationCodes").filter((c) => c.redemptions.some((r) => r.email === q));
+  },
+  addMany(codes: ActivationCode[]) {
+    db.mutate((d) => {
+      d.activationCodes.push(...codes);
+    });
+  },
+  update(hash: string, patch: Partial<ActivationCode>) {
+    return db.mutate((d) => {
+      const c = d.activationCodes.find((x) => x.hash === hash);
+      if (c) Object.assign(c, patch);
+      return c;
+    });
+  },
+  disableBatch(batchId: string) {
+    db.mutate((d) => {
+      const b = d.activationBatches.find((x) => x.id === batchId);
+      if (b) b.disabled = true;
+      for (const c of d.activationCodes) if (c.batchId === batchId) c.disabled = true;
+    });
+  },
+};
+
+/** In-memory atomic redeem (used when Firestore is not configured, and as the local apply after a transaction). */
+export function redeemCodeInMemory(opts: {
+  hash: string;
+  user: { id: string; email: string; plan: import("../plans").PlanId; planRenewsAt?: number };
+  now?: number;
+}): { ok: true; code: ActivationCode; plan: import("../plans").PlanId; planRenewsAt: number; payment: Payment } | { ok: false; reason: "invalid" | "used" | "expired" | "disabled" | "already" } {
+  const now = opts.now ?? Date.now();
+  return db.mutate((d) => {
+    const out = applyRedeemToState(
+      { codes: d.activationCodes, batches: d.activationBatches, users: d.users, payments: d.payments as any },
+      { hash: opts.hash, user: opts.user, now, paymentId: newId("pay_") },
+    );
+    if (!out.ok) return { ok: false as const, reason: out.reason };
+    return { ok: true as const, code: out.code, plan: out.plan, planRenewsAt: out.planRenewsAt, payment: out.payment as Payment };
+  });
+}

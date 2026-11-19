@@ -21,4 +21,10 @@ export const pricing = {
     starsPay: "Pay with Telegram Stars ⭐",
     starsPerMonth: "Stars / month",
     starsPerYear: "Stars / year",
+    haveCode: "Have a code?",
+    codeHint: "Enter an activation code to start or extend your plan.",
+    redeem: "Redeem code",
+    codeOk: "Your plan has been activated.",
+    codeExtended: "Your plan has been extended.",
+    codeError: "We couldn't redeem this code. Check it and try again.",
   };

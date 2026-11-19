@@ -7,6 +7,7 @@ import { billingMode } from "@/lib/env";
 import { FAQ } from "@/lib/content/faq";
 import { Faq } from "@/components/content/Faq";
 import { JsonLd } from "@/components/seo/JsonLd";
+import { RedeemCodeForm } from "@/components/billing/RedeemCodeForm";
 import { FEATURE_LABELS, PLANS, type Feature } from "@/lib/plans";
 
 export const metadata = buildMetadata({ title: "الأسعار — فروستلي برو | Frostly Pro Pricing", path: "/pricing", description: "خطط فروستلي: مجاني، برو، وأعمال. تحميل جماعي، مقارنة، مراقبة، تحليلات متقدمة وAPI." });
@@ -21,6 +22,9 @@ export default async function PricingPage() {
       <JsonLd data={jsonLdFaq(FAQ[locale])} />
       <PageHeader title={t.pricing.title} subtitle={t.pricing.subtitle} eyebrow={<Badge tone="gold">Frostly Pro</Badge>} />
       <PricingTable currentPlan={user?.plan ?? null} billing={billingMode()} />
+      <div className="mx-auto mt-10 max-w-xl">
+        <RedeemCodeForm />
+      </div>
       <div className="card mt-16 overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
           <thead>

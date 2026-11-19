@@ -21,4 +21,10 @@ export const pricing = {
     starsPay: "ادفع بنجوم Telegram ⭐",
     starsPerMonth: "نجمة / شهر",
     starsPerYear: "نجمة / سنة",
+    haveCode: "عندك كود؟",
+    codeHint: "أدخل كود التفعيل لتفعيل أو تمديد اشتراكك.",
+    redeem: "تفعيل الكود",
+    codeOk: "تم تفعيل الاشتراك بنجاح.",
+    codeExtended: "تم تمديد اشتراكك بنجاح.",
+    codeError: "تعذر تفعيل الكود. تأكد منه أو جرّب لاحقاً.",
   };

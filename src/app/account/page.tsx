@@ -10,6 +10,7 @@ import { date } from "@/lib/format";
 import { buildMetadata } from "@/lib/seo";
 import { ApiKeyButton, CancelButton, LogoutButton } from "@/components/auth/AccountActions";
 import { Badge, ProBadge } from "@/components/ui";
+import { RedeemCodeForm } from "@/components/billing/RedeemCodeForm";
 
 export const metadata = buildMetadata({ title: "حسابي | Frostly", path: "/account", noindex: true });
 export const dynamic = "force-dynamic";
@@ -93,6 +94,9 @@ export default async function AccountPage({ searchParams }: { searchParams: { up
           </Link>
         )}
       </div>
+      <div className="mt-4">
+        <RedeemCodeForm />
+      </div>
       <div className="card mt-4 p-6">
         <div className="mb-3 text-sm text-ink-3">{t.account.payments}</div>
         {payments.length ? (
@@ -106,7 +110,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { up
                     {p.currency === "XTR" ? `${p.amount} ⭐` : `$${p.amount}`} / {p.interval}
                   </td>
                   <td className="py-2">
-                    <Badge tone={p.provider === "paypal" || p.provider === "stripe" ? "green" : "blue"}>{p.provider}</Badge>
+                    <Badge tone={p.provider === "paypal" || p.provider === "stripe" || p.provider === "code" || p.provider === "telegram_stars" ? "green" : "blue"}>{p.provider}{p.batchLabel ? ` · ${p.batchLabel}` : ""}</Badge>
                   </td>
                 </tr>
               ))}

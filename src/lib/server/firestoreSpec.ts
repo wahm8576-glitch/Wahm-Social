@@ -4,7 +4,7 @@ import { normEmail, safeDocId, type CollName, type MirrorSpec } from "./mirror";
 const strip = (o: unknown) => JSON.parse(JSON.stringify(o)) as Record<string, unknown>;
 
 export const FIRESTORE_SPEC: MirrorSpec = {
-  remote: { users: "users", watchlist: "watchlist", payments: "payments", billingEvents: "billingEvents", usage: "usage", searches: "app" },
+  remote: { users: "users", watchlist: "watchlist", payments: "payments", billingEvents: "billingEvents", usage: "usage", searches: "app", activationBatches: "activationBatches", activationCodes: "activationCodes" },
   keepRemovals: ["usage"],
   docs(coll: CollName, rows: unknown[]) {
     const r = rows as Record<string, any>[];
@@ -15,7 +15,10 @@ export const FIRESTORE_SPEC: MirrorSpec = {
       case "watchlist":
       case "payments":
       case "billingEvents":
+      case "activationBatches":
         return r.filter((x) => x?.id).map((x) => ({ coll, id: safeDocId(x.id), data: strip(x) }));
+      case "activationCodes":
+        return r.filter((x) => x?.hash).map((x) => ({ coll, id: safeDocId(x.hash), data: strip(x) }));
       case "usage":
         return r.filter((x) => x?.key).map((x) => ({ coll: "usage", id: safeDocId(x.key), data: { ...strip(x), day: String(x.key).slice(-10) } }));
       case "searches":

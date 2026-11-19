@@ -4,7 +4,7 @@
  * last written and sends only changed / removed documents, in batches.
  * Pure logic (no Firebase import) so it can be unit-tested with a fake backend.
  */
-export type CollName = "users" | "watchlist" | "usage" | "searches" | "payments" | "billingEvents";
+export type CollName = "users" | "watchlist" | "usage" | "searches" | "payments" | "billingEvents" | "activationBatches" | "activationCodes";
 
 export interface RemoteOp {
   coll: string;
