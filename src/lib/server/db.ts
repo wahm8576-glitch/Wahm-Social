@@ -30,6 +30,7 @@ export interface User {
   apiKey?: string;
   paypalSubscriptionId?: string;
   paypalPayerId?: string;
+  telegramUserId?: number;
 }
 
 export interface WatchItem {
@@ -61,11 +62,12 @@ export interface Payment {
   interval: "month" | "year" | "custom";
   amount: number;
   currency: string;
-  provider: "mock" | "stripe" | "paypal" | "admin";
-  status: "paid" | "pending" | "failed";
+  provider: "mock" | "stripe" | "paypal" | "admin" | "telegram_stars";
+  status: "paid" | "pending" | "failed" | "refunded";
   createdAt: number;
   eventId?: string;
   providerRef?: string;
+  telegramUserId?: number;
 }
 
 export interface BillingEvent {
@@ -323,7 +325,15 @@ export const Payments = {
     return pay;
   },
   forUser: (userId: string) => db.get("payments").filter((p) => p.userId === userId),
+  byId: (id: string) => db.get("payments").find((p) => p.id === id),
   all: () => db.get("payments"),
+  updateStatus(id: string, status: Payment["status"]) {
+    return db.mutate((d) => {
+      const p = d.payments.find((x) => x.id === id);
+      if (p) p.status = status;
+      return p;
+    });
+  },
 };
 
 export const BillingEvents = {

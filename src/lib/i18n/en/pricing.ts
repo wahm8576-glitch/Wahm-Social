@@ -18,4 +18,7 @@ export const pricing = {
     faq: "FAQ",
     mock: "Mock payment mode is on — you won't be charged.",
     unavailable: "Payments aren't configured yet. Checkout will open once billing is set up.",
+    starsPay: "Pay with Telegram Stars ⭐",
+    starsPerMonth: "Stars / month",
+    starsPerYear: "Stars / year",
   };

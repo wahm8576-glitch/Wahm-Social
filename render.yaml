@@ -74,6 +74,12 @@ services:
         sync: false
       - key: PAYPAL_PLAN_BIZ_YEARLY
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
     # For durable users/watchlist on a paid plan, attach a disk and point DATA_DIR at it:
     # disk:
     #   name: wahm-data

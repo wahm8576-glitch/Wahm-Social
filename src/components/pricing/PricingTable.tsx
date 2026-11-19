@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { FEATURE_LABELS, PLANS, type PlanId } from "@/lib/plans";
 import type { BillingMode } from "@/lib/env";
+import { starPriceKey } from "@/lib/billing/star-prices";
 import { useI18n, useSite } from "../I18nProvider";
 import { cx, ProBadge } from "../ui";
 
@@ -13,7 +14,9 @@ export function PricingTable({ currentPlan, billing }: { currentPlan: PlanId | n
   const router = useRouter();
   const [interval, setInterval] = useState<"month" | "year">("year");
   const [busy, setBusy] = useState<PlanId | null>(null);
+  const [busyStars, setBusyStars] = useState<PlanId | null>(null);
   const [error, setError] = useState("");
+  const anyBusy = busy !== null || busyStars !== null;
 
   async function checkout(plan: PlanId) {
     if (plan === "free") return router.push(currentPlan ? "/account" : "/register");
@@ -29,6 +32,18 @@ export function PricingTable({ currentPlan, billing }: { currentPlan: PlanId | n
       router.refresh();
       return;
     }
+    if (json.data.redirect) window.location.href = json.data.redirect;
+  }
+
+  async function checkoutStars(plan: PlanId) {
+    if (plan === "free") return;
+    if (!currentPlan) return router.push(`/register?next=/pricing`);
+    setBusyStars(plan);
+    setError("");
+    const res = await fetch("/api/billing/telegram/checkout", { method: "POST", body: JSON.stringify({ plan, interval }) });
+    const json = await res.json();
+    setBusyStars(null);
+    if (!json.ok) return setError(json.error?.message ?? t.states.error);
     if (json.data.redirect) window.location.href = json.data.redirect;
   }
 
@@ -49,7 +64,7 @@ export function PricingTable({ currentPlan, billing }: { currentPlan: PlanId | n
           ))}
         </div>
         {billing === "mock" && <p className="text-xs text-amber-300/80">{t.pricing.mock}</p>}
-        {billing === "off" && <p className="text-sm text-amber-300/90">{t.pricing.unavailable}</p>}
+        {billing === "off" && !site.stars && <p className="text-sm text-amber-300/90">{t.pricing.unavailable}</p>}
         {error && <p className="text-sm text-rose-400">{error}</p>}
       </div>
       <div className="grid gap-5 lg:grid-cols-3">
@@ -84,11 +99,23 @@ export function PricingTable({ currentPlan, billing }: { currentPlan: PlanId | n
               </ul>
               <button
                 onClick={() => checkout(p.id)}
-                disabled={isCurrent || busy !== null || (p.id !== "free" && billing === "off")}
+                disabled={isCurrent || anyBusy || (p.id !== "free" && billing === "off")}
                 className={cx("mt-7 w-full", p.highlight ? "btn-primary" : "btn-ghost")}
               >
                 {isCurrent ? t.pricing.current : busy === p.id ? "…" : p.id === "free" ? t.pricing.startFree : t.pricing.choose}
               </button>
+              {site.stars && p.id !== "free" && !isCurrent && (
+                <button
+                  type="button"
+                  onClick={() => checkoutStars(p.id)}
+                  disabled={anyBusy}
+                  className="btn-ghost mt-2 w-full"
+                >
+                  {busyStars === p.id
+                    ? "…"
+                    : `${t.pricing.starsPay} · ${site.starPrices[starPriceKey(p.id === "business" ? "business" : "pro", interval)].toLocaleString()} ⭐ / ${interval === "year" ? (locale === "ar" ? "سنة" : "year") : (locale === "ar" ? "شهر" : "month")}`}
+                </button>
+              )}
             </div>
           );
         })}

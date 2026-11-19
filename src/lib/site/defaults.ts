@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     pro: true,
     demoMode: "",
     prices: { proMonthly: 7.99, proYearly: 59.99, bizMonthly: 29.99, bizYearly: 249.99 },
+    starPrices: { proMonthly: 599, proYearly: 4599, bizMonthly: 2299, bizYearly: 19199 },
   },
   theme: { accentPrimary: "", accentSecondary: "", defaultTheme: "system" },
   assets: { favicon: "", ogImage: "", heroImage: "" },

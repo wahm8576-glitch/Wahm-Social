@@ -42,7 +42,15 @@ export default async function FeaturesPage({ searchParams }: { searchParams: Fla
           <Text name="bizMonthly" label="أعمال شهري" value={String(f.prices.bizMonthly)} dir="ltr" type="number" />
           <Text name="bizYearly" label="أعمال سنوي" value={String(f.prices.bizYearly)} dir="ltr" type="number" />
         </div>
-        <p className="text-xs text-ink-4">ملاحظة: إذا تستخدم Stripe بأسعار ثابتة (Price IDs) لازم تعدّلها في Stripe كمان.</p>
+        <p className="text-sm font-semibold text-ink-2">⭐ أسعار نجوم Telegram</p>
+        <p className="text-xs text-ink-4">الافتراضي تقريباً سعر الدولار × 77 مقرّب لرقم مريح. اترك 0 أو عدّل. الشهري اشتراك يتجدد، السنوي دفعة واحدة.</p>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Text name="starProMonthly" label="برو شهري (نجوم)" value={String(f.starPrices?.proMonthly ?? 599)} dir="ltr" type="number" />
+          <Text name="starProYearly" label="برو سنوي (نجوم)" value={String(f.starPrices?.proYearly ?? 4599)} dir="ltr" type="number" />
+          <Text name="starBizMonthly" label="أعمال شهري (نجوم)" value={String(f.starPrices?.bizMonthly ?? 2299)} dir="ltr" type="number" />
+          <Text name="starBizYearly" label="أعمال سنوي (نجوم)" value={String(f.starPrices?.bizYearly ?? 19199)} dir="ltr" type="number" />
+        </div>
+        <p className="text-xs text-ink-4">ملاحظة: إذا تستخدم Stripe أو PayPal بأسعار ثابتة لازم تعدّلها عند الموفّر كمان.</p>
         <Submit />
       </FormSection>
     </PanelShell>

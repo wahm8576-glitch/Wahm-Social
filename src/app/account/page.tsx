@@ -103,7 +103,7 @@ export default async function AccountPage({ searchParams }: { searchParams: { up
                   <td className="py-2 text-ink-2">{date(p.createdAt, locale)}</td>
                   <td className="py-2 text-ink">{planOf(p.plan).name[locale]}</td>
                   <td className="py-2 text-ink-2" dir="ltr">
-                    ${p.amount} / {p.interval}
+                    {p.currency === "XTR" ? `${p.amount} ⭐` : `$${p.amount}`} / {p.interval}
                   </td>
                   <td className="py-2">
                     <Badge tone={p.provider === "paypal" || p.provider === "stripe" ? "green" : "blue"}>{p.provider}</Badge>

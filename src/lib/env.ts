@@ -93,6 +93,15 @@ export const env = {
   get paypalPlanBizYearly() {
     return read("PAYPAL_PLAN_BIZ_YEARLY");
   },
+  get telegramBotToken() {
+    return read("TELEGRAM_BOT_TOKEN");
+  },
+  get telegramWebhookSecret() {
+    return read("TELEGRAM_WEBHOOK_SECRET");
+  },
+  get telegramBotUsername() {
+    return read("TELEGRAM_BOT_USERNAME", "PaySubStarsBot");
+  },
   get demoMode() {
     return read("DEMO_MODE", "auto") as "auto" | "on" | "off";
   },
@@ -122,6 +131,8 @@ export const env = {
 export type BillingMode = "paypal" | "stripe" | "mock" | "off";
 
 export const paypalConfigured = () => Boolean(env.paypalClientId && env.paypalClientSecret);
+
+export const telegramStarsConfigured = () => Boolean(env.telegramBotToken);
 
 /** paypal if credentials exist; else stripe; mock only in local/dev; off in production when nothing is configured. */
 export const billingMode = (): BillingMode => {

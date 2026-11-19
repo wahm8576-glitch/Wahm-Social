@@ -52,6 +52,12 @@ export const SECTION_PARSERS: Record<string, (s: SiteSettings, f: FormData) => S
       bizMonthly: num(f, "bizMonthly", x.prices.bizMonthly),
       bizYearly: num(f, "bizYearly", x.prices.bizYearly),
     };
+    x.starPrices = {
+      proMonthly: Math.round(num(f, "starProMonthly", x.starPrices?.proMonthly ?? 0)),
+      proYearly: Math.round(num(f, "starProYearly", x.starPrices?.proYearly ?? 0)),
+      bizMonthly: Math.round(num(f, "starBizMonthly", x.starPrices?.bizMonthly ?? 0)),
+      bizYearly: Math.round(num(f, "starBizYearly", x.starPrices?.bizYearly ?? 0)),
+    };
     return s;
   },
   relay(s, f) {

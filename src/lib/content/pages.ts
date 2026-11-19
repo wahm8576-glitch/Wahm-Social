@@ -16,7 +16,7 @@ export const PAGES: Record<string, { title: { ar: string; en: string }; body: { 
 - أسماء المستخدمين التي تبحث عنها لإحصاءات "الأكثر بحثاً" بشكل مجمّع.
 
 ## المدفوعات
-المدفوعات تتم عبر **PayPal**. فروستلي لا يستقبل أرقام البطاقات ولا يخزّنها على خوادمه. PayPal يعالج بيانات الدفع وفق سياسة الخصوصية الخاصة به. نحتفظ بسجل محلي للاشتراك (الخطة وتاريخ التجديد ومعرّف الاشتراك) لإدارة حسابك.
+المدفوعات تتم عبر **PayPal** أو **نجوم Telegram (Telegram Stars)** عبر البوت ‎@PaySubStarsBot. فروستلي لا يستقبل أرقام البطاقات ولا يخزّنها على خوادمه. PayPal وTelegram يعالجان بيانات الدفع وفق سياسات الخصوصية الخاصة بهما. نحتفظ بسجل محلي للاشتراك (الخطة وتاريخ التجديد ومعرّف العملية) لإدارة حسابك.
 
 ## ما لا نجمعه
 - كلمات مرور حسابات تيك توك أو انستقرام.
@@ -36,7 +36,7 @@ export const PAGES: Record<string, { title: { ar: string; en: string }; body: { 
 - Searched usernames, aggregated for "trending" stats.
 
 ## Payments
-Payments are processed by **PayPal**. Frostly does not receive or store your card numbers on our servers. PayPal handles payment data under its own privacy policy. We keep a local record of your subscription (plan, renewal date, and subscription id) to manage your account.
+Payments are processed by **PayPal** or **Telegram Stars** via ‎@PaySubStarsBot. Frostly does not receive or store your card numbers on our servers. PayPal and Telegram handle payment data under their own privacy policies. We keep a local record of your subscription (plan, renewal date, and payment id) to manage your account.
 
 ## What we don't collect
 - TikTok or Instagram passwords.
@@ -61,7 +61,7 @@ Seller: **Frostly**.`,
 - يُمنع استخدام الخدمة للتحرش أو التتبع المؤذي.
 
 ## الاشتراكات والدفع
-- البائع هو **Frostly**. تُعالج المدفوعات عبر **PayPal**.
+- البائع هو **Frostly**. تُعالج المدفوعات عبر **PayPal** أو **نجوم Telegram** (البوت ‎@PaySubStarsBot). الاشتراك الشهري بنجوم تيليجرام يتجدد تلقائياً كل 30 يوماً؛ السنوي دفعة واحدة لمدة 365 يوماً.
 - تتجدد اشتراكات برو وأعمال تلقائياً ما لم تُلغَ. يمكنك الإلغاء في أي وقت من صفحة حسابي؛ تظل الميزات فعالة حتى نهاية الفترة المدفوعة.
 - الأسعار معروضة بالدولار الأمريكي وقد تُضاف ضرائب وفق قواعد PayPal ومنطقتك.
 - سياسة الاسترجاع موضّحة في صفحة [الاسترجاع](/refund): استرجاع خلال 14 يوماً عند الطلب المعقول.
@@ -76,7 +76,7 @@ Seller: **Frostly**.`,
 - Harassment or harmful tracking is prohibited.
 
 ## Subscriptions and payment
-- The seller is **Frostly**. Payments are processed by **PayPal**.
+- The seller is **Frostly**. Payments are processed by **PayPal** or **Telegram Stars** (bot ‎@PaySubStarsBot). Monthly Stars plans auto-renew every 30 days; yearly is a one-time payment for 365 days.
 - Pro and Business plans renew automatically unless cancelled. You can cancel any time from your account page; features stay active until the end of the paid period.
 - Prices are shown in USD; taxes may be added according to PayPal's rules and your region.
 - Refunds are described on the [Refund Policy](/refund) page: a 14-day refund on a reasonable request.
@@ -97,7 +97,7 @@ Contact: wahmsec@gmail.com`,
 بعد هذه المدة لا نضمن الاسترجاع للفترة المستخدمة، وقد ننظر في الحالات الاستثنائية (خصم مكرر أو خطأ تقني).
 
 ## طريقة الاسترجاع
-المدفوعات تتم عبر **PayPal**، ويُعاد المبلغ عادةً إلى نفس طريقة الدفع في PayPal خلال عدة أيام عمل بعد الموافقة.
+مدفوعات PayPal تُعاد عادةً إلى نفس طريقة الدفع خلال عدة أيام عمل بعد الموافقة. مدفوعات نجوم Telegram تُسترجع إلى رصيد النجوم عبر البوت بعد موافقة الدعم.
 
 ## الإلغاء
 إلغاء التجديد لا يوقف الفترة المدفوعة الحالية؛ تظل الميزات تعمل حتى تاريخ انتهائها. يمكنك الإلغاء من صفحة حسابي.
@@ -110,7 +110,7 @@ If the subscription isn't right for you, you may request a refund within **14 da
 We don't guarantee a refund for time already used after this window, though we may consider exceptional cases (a duplicate charge or a technical error).
 
 ## How refunds are paid
-Payments are processed by **PayPal**. Approved refunds are typically returned to the original PayPal payment method within several business days.
+PayPal refunds are typically returned to the original PayPal payment method within several business days. Telegram Stars refunds are credited back to the buyer's Stars balance after support approves the request.
 
 ## Cancellation
 Cancelling stops future renewals but does not end the current paid period; features stay active until it expires. You can cancel from your account page.

@@ -21,7 +21,7 @@ export default async function BillingAdminPage({ searchParams }: { searchParams:
   const mode = billingMode();
   return (
     <PanelShell active="billing" title="الدفع والاشتراكات" flash={searchParams}>
-      <Section title="الحالة" desc="الموفّر الأساسي للدفع هو PayPal. الوضع التجريبي (ترقية مجانية بضغطة) يعمل فقط على جهاز التطوير، ومقفول في الإنتاج إذا ما انضبطت المفاتيح.">
+      <Section title="الحالة" desc="الموفّرون: PayPal ونجوم Telegram (@PaySubStarsBot). الوضع التجريبي (ترقية مجانية بضغطة) يعمل فقط على جهاز التطوير، ومقفول في الإنتاج إذا ما انضبطت المفاتيح.">
         <p className="text-sm text-ink-2">
           وضع الدفع الحالي: <span dir="ltr" className="font-mono font-bold text-ink">{mode}</span>
         </p>
@@ -68,6 +68,12 @@ export default async function BillingAdminPage({ searchParams }: { searchParams:
                 {user.paypalSubscriptionId}
               </p>
             )}
+            {user.telegramUserId ? (
+              <p dir="ltr">
+                <span className="text-ink-4">Telegram user id: </span>
+                {user.telegramUserId}
+              </p>
+            ) : null}
           </div>
         )}
       </Section>
@@ -117,9 +123,21 @@ export default async function BillingAdminPage({ searchParams }: { searchParams:
                     <td className="py-2 text-ink-2">{fmt(p.createdAt)}</td>
                     <td className="py-2 text-ink">{p.plan}</td>
                     <td className="py-2 text-ink-2" dir="ltr">
-                      ${p.amount} / {p.interval}
+                      {p.currency === "XTR" ? `${p.amount} ⭐` : `$${p.amount}`} / {p.interval}
                     </td>
-                    <td className="py-2 text-ink">{p.provider}</td>
+                    <td className="py-2 text-ink">{p.provider}{p.status === "refunded" ? " (مسترجع)" : ""}</td>
+                    <td className="py-2">
+                      {p.provider === "telegram_stars" && p.status === "paid" && p.providerRef && (
+                        <form method="post" action={`${base}/api/billing`}>
+                          <input type="hidden" name="email" value={user.email} />
+                          <input type="hidden" name="op" value="refund_stars" />
+                          <input type="hidden" name="paymentId" value={p.id} />
+                          <button type="submit" className="btn-ghost btn-sm">
+                            استرجاع النجوم
+                          </button>
+                        </form>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

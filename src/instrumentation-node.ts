@@ -4,11 +4,18 @@
  */
 import { refreshSettings } from "./lib/site/store";
 import { initRemoteStore } from "./lib/server/db";
+import { ensureTelegramBot, sanitizeTelegramError } from "./lib/billing/telegram";
 
 // Settings first (a service account may be stored in the panel), then load user data from Firestore.
 export async function boot() {
   await refreshSettings().catch(() => {});
   await initRemoteStore().catch((e) => console.error("[db] remote init failed", e));
+  try {
+    const url = await ensureTelegramBot();
+    if (url && url !== "skipped: missing token or webhook secret") console.log("[telegram] webhook ready");
+  } catch (e) {
+    console.error("[telegram] setup failed:", sanitizeTelegramError(e));
+  }
 }
 const g = globalThis as unknown as { __frostlyTimer?: NodeJS.Timeout };
 if (!g.__frostlyTimer) {

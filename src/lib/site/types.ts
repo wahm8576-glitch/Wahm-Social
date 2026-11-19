@@ -45,6 +45,7 @@ export interface FeatureSettings {
   pro: boolean;
   demoMode: "" | "auto" | "on" | "off";
   prices: { proMonthly: number; proYearly: number; bizMonthly: number; bizYearly: number };
+  starPrices: { proMonthly: number; proYearly: number; bizMonthly: number; bizYearly: number };
 }
 
 export interface ThemeSettings {

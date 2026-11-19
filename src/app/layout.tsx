@@ -11,7 +11,7 @@ import { Footer } from "@/components/layout/Footer";
 import { Banner } from "@/components/layout/Banner";
 import { currentUser, publicUser } from "@/lib/server/auth";
 import { WelcomeToast } from "@/components/auth/WelcomeToast";
-import { env } from "@/lib/env";
+import { env, telegramStarsConfigured } from "@/lib/env";
 import { jsonLdOrganization, jsonLdWebsite } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { getSettings } from "@/lib/site/store";
@@ -56,7 +56,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="font-sans">
         <NavProgress />
-        <I18nProvider locale={locale} t={t} site={publicSite(s)}>
+        <I18nProvider locale={locale} t={t} site={publicSite(s, { stars: telegramStarsConfigured() })}>
           {isPanel ? (
             <main className="min-h-screen">{children}</main>
           ) : s.maintenance?.enabled ? (
