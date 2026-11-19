@@ -12,7 +12,7 @@ export async function boot() {
   await initRemoteStore().catch((e) => console.error("[db] remote init failed", e));
   try {
     const url = await ensureTelegramBot();
-    if (url && url !== "skipped: missing token or webhook secret") console.log("[telegram] webhook ready");
+    if (url && !String(url).startsWith("skipped")) console.log("[telegram] webhook ready");
   } catch (e) {
     console.error("[telegram] setup failed:", sanitizeTelegramError(e));
   }

@@ -4,6 +4,8 @@ import { FormSection, Section } from "@/components/admin/Section";
 import { Text, Select, Toggle, Submit } from "@/components/admin/Fields";
 import { Users, Payments } from "@/lib/server/db";
 import { billingMode } from "@/lib/env";
+import { telegramAdminStatus } from "@/lib/billing/telegram";
+import { headers } from "next/headers";
 import { planOf } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +21,58 @@ export default async function BillingAdminPage({ searchParams }: { searchParams:
   const user = email ? Users.byEmail(email) : undefined;
   const payments = user ? Payments.forUser(user.id).slice(-8).reverse() : [];
   const mode = billingMode();
+  const tg = await telegramAdminStatus({ headers: headers() });
+  const errAt = tg.lastErrorDate
+    ? new Date(tg.lastErrorDate * 1000).toLocaleString("ar-SA", { timeZone: "Asia/Riyadh" })
+    : "";
   return (
     <PanelShell active="billing" title="الدفع والاشتراكات" flash={searchParams}>
-      <Section title="الحالة" desc="الموفّرون: PayPal ونجوم Telegram (@PaySubStarsBot). الوضع التجريبي (ترقية مجانية بضغطة) يعمل فقط على جهاز التطوير، ومقفول في الإنتاج إذا ما انضبطت المفاتيح.">
+      <Section title="الحالة" desc="الموفّرون: PayPal ونجوم Telegram. الوضع التجريبي (ترقية مجانية بضغطة) يعمل فقط على جهاز التطوير، ومقفول في الإنتاج إذا ما انضبطت المفاتيح.">
         <p className="text-sm text-ink-2">
           وضع الدفع الحالي: <span dir="ltr" className="font-mono font-bold text-ink">{mode}</span>
         </p>
+      </Section>
+      <Section title="Telegram" desc="حالة بوت الدفع بنجوم Telegram. الصق التوكن من صفحة المفاتيح — يكفي التوكن وحده، بدون بيئة Render أو إعادة تشغيل.">
+        {!tg.configured ? (
+          <p className="text-sm text-ink-2">
+            التوكن غير مضبوط. افتح{" "}
+            <a className="font-semibold text-accent-600 underline" href={`${base}/keys`}>
+              صفحة المفاتيح
+            </a>{" "}
+            والصق «توكن بوت تيليجرام (Telegram Bot Token)».
+          </p>
+        ) : (
+          <div className="space-y-1 text-sm text-ink-2">
+            <p>
+              البوت:{" "}
+              <span dir="ltr" className="font-mono font-bold text-ink">
+                {tg.username ? `@${tg.username}` : "—"}
+              </span>
+            </p>
+            <p dir="ltr">
+              <span className="text-ink-4">webhook: </span>
+              <span className="font-mono text-ink break-all">{tg.webhookUrl || "غير مسجّل"}</span>
+            </p>
+            {tg.expectedUrl && tg.webhookUrl && tg.webhookUrl !== tg.expectedUrl && (
+              <p className="text-amber-600 dark:text-amber-300">العنوان المتوقع مختلف: {tg.expectedUrl}</p>
+            )}
+            {tg.lastErrorMessage ? (
+              <p>
+                آخر خطأ: {tg.lastErrorMessage}
+                {errAt ? ` — ${errAt} (توقيت آسيا/الرياض)` : ""}
+              </p>
+            ) : (
+              <p className="text-ink-4">لا يوجد last_error من Telegram.</p>
+            )}
+            {tg.error && <p className="text-amber-600 dark:text-amber-300">{tg.error}</p>}
+            <form method="post" action={`${base}/api/billing`} className="pt-2">
+              <input type="hidden" name="op" value="register_telegram_webhook" />
+              <button type="submit" className="btn-primary">
+                إعادة تسجيل الويب هوك
+              </button>
+            </form>
+          </div>
+        )}
       </Section>
       <Section title="🔍 البحث عن مستخدم" desc="أدخل بريد أي حساب لعرض خطته الحالية وتاريخ الانتهاء، ثم فعّل أو مدّد أو ألغِ الاشتراك مباشرة.">
         <form method="get" action={`${base}/billing`} className="flex flex-col gap-3 sm:flex-row sm:items-end">

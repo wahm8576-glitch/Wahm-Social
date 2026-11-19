@@ -3,7 +3,7 @@ export interface SecretDef {
   key: string;
   env: string;
   label: string;
-  group: "proxy" | "instagram" | "tiktok" | "billing";
+  group: "proxy" | "instagram" | "tiktok" | "billing" | "telegram";
   hint?: string;
   multiline?: boolean;
 }
@@ -29,9 +29,8 @@ export const SECRET_DEFS: SecretDef[] = [
   { key: "paypalPlanProYearly", env: "PAYPAL_PLAN_PRO_YEARLY", label: "PayPal plan id — Pro سنوي", group: "billing" },
   { key: "paypalPlanBizMonthly", env: "PAYPAL_PLAN_BIZ_MONTHLY", label: "PayPal plan id — Business شهري", group: "billing" },
   { key: "paypalPlanBizYearly", env: "PAYPAL_PLAN_BIZ_YEARLY", label: "PayPal plan id — Business سنوي", group: "billing" },
-  { key: "telegramBotToken", env: "TELEGRAM_BOT_TOKEN", label: "Telegram Bot Token (@PaySubStarsBot)", group: "billing", hint: "من BotFather — لا تشاركه" },
-  { key: "telegramWebhookSecret", env: "TELEGRAM_WEBHOOK_SECRET", label: "Telegram webhook secret_token", group: "billing" },
-  { key: "telegramBotUsername", env: "TELEGRAM_BOT_USERNAME", label: "معرف بوت تيليجرام بدون @", group: "billing", hint: "الافتراضي PaySubStarsBot" },
+  { key: "telegramBotToken", env: "TELEGRAM_BOT_TOKEN", label: "توكن بوت تيليجرام (Telegram Bot Token)", group: "telegram", hint: "من BotFather. يكفي هذا الحقل لتفعيل الدفع بنجوم Telegram — يُحفظ مشفّراً ويعمل فوراً بدون إعادة تشغيل أو تعديل بيئة Render. تغيير التوكن يحدّث البوت تلقائياً." },
+  { key: "telegramWebhookSecret", env: "TELEGRAM_WEBHOOK_SECRET", label: "سر ويب هوك Telegram (اختياري)", group: "telegram", hint: "اختياري. إذا فاضي يُشتق تلقائياً من توكن البوت. لا تحتاج تضعه." },
 ];
 
 export const SECRET_KEYS = new Set(SECRET_DEFS.map((d) => d.key));

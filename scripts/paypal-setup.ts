@@ -13,10 +13,19 @@ const which = process.env.PAYPAL_ENV === "live" || process.env.PAYPAL_ENV === "p
 const base = which === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 const clientId = process.env.PAYPAL_CLIENT_ID ?? "";
 const secret = process.env.PAYPAL_CLIENT_SECRET ?? "";
-const webhookUrl = process.env.PAYPAL_WEBHOOK_URL ?? "https://wahm-social.onrender.com/api/billing/paypal/webhook";
+function siteOrigin(): string {
+  const raw = (process.env.PAYPAL_WEBHOOK_URL || process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.RENDER_EXTERNAL_URL || "").trim();
+  return raw.replace(/\/$/, "");
+}
+const webhookUrl = process.env.PAYPAL_WEBHOOK_URL
+  || (siteOrigin() ? `${siteOrigin()}/api/billing/paypal/webhook` : "");
 
 if (!clientId || !secret) {
   console.error("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET");
+  process.exit(1);
+}
+if (!webhookUrl) {
+  console.error("Set SITE_URL or PAYPAL_WEBHOOK_URL to the public site origin (e.g. https://example.com)");
   process.exit(1);
 }
 

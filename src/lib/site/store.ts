@@ -5,6 +5,7 @@ import { applyOverrides } from "./apply";
 import { setSnapshot, snapshot } from "./snapshot";
 import type { SiteSettings } from "./types";
 import { hydrateHealthFromFirestore, hydratePoolsFromFirestore, persistHealthToFirestore, persistPoolsToFirestore } from "../pools/persist";
+import { ensureTelegramBotLazy } from "../billing/telegram";
 
 const TTL_MS = 45_000;
 const g = globalThis as unknown as { __frostlySiteLoad?: Promise<void> | null; __frostlyLoadOk?: boolean };
@@ -38,6 +39,7 @@ async function load(): Promise<void> {
     applyOverrides(s, sec);
     setSnapshot({ settings: s, secrets: sec, loadedAt: Date.now(), error });
     g.__frostlyLoadOk = true;
+    ensureTelegramBotLazy();
   } catch (e) {
     g.__frostlyLoadOk = false;
     // Keep the last good copy; retry sooner.
@@ -75,6 +77,7 @@ async function persist(settings: SiteSettings, secrets: Record<string, string>, 
   await dataStore().write(files, message);
   applyOverrides(settings, secrets);
   setSnapshot({ settings, secrets, loadedAt: Date.now(), error: "" });
+  ensureTelegramBotLazy();
   void persistPoolsToFirestore(secrets);
   void persistHealthToFirestore();
 }

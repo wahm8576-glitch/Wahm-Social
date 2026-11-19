@@ -15,6 +15,7 @@ import { handler } from "@/lib/server/respond";
 import { PlatformError } from "@/lib/platforms/types";
 import { requireFeatureOn } from "@/lib/site/flags";
 import { paypalFetch, paypalPlanId } from "@/lib/billing/paypal";
+import { billingReturnUrls } from "@/lib/site/publicUrl";
 
 const Body = z.object({ plan: z.enum(["pro", "business"]), interval: z.enum(["month", "year"]) });
 
@@ -39,6 +40,8 @@ export const POST = handler(async (req: Request) => {
     return NextResponse.json({ ok: true, data: { mode: "mock", redirect: "/account?upgraded=1" } });
   }
 
+  const returns = billingReturnUrls(req);
+
   if (mode === "paypal") {
     const planId = paypalPlanId(plan, interval);
     if (!planId) throw new PlatformError("internal", "PayPal plan ids are not configured", 500);
@@ -58,8 +61,8 @@ export const POST = handler(async (req: Request) => {
           locale: "en-US",
           shipping_preference: "NO_SHIPPING",
           user_action: "SUBSCRIBE_NOW",
-          return_url: `${env.siteUrl}/account?upgraded=1`,
-          cancel_url: `${env.siteUrl}/pricing?canceled=1`,
+          return_url: returns.returnUrl,
+          cancel_url: returns.cancelUrl,
         },
       }),
     });
@@ -74,8 +77,8 @@ export const POST = handler(async (req: Request) => {
     mode: "subscription",
     "line_items[0][price]": price,
     "line_items[0][quantity]": "1",
-    success_url: `${env.siteUrl}/account?upgraded=1`,
-    cancel_url: `${env.siteUrl}/pricing?canceled=1`,
+    success_url: returns.returnUrl,
+    cancel_url: returns.cancelUrl,
     client_reference_id: user.id,
     customer_email: user.email,
     "metadata[plan]": plan,

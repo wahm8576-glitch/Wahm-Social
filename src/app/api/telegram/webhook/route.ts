@@ -4,6 +4,8 @@
  */
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { getSettings } from "@/lib/site/store";
+import { publicSiteUrl } from "@/lib/site/publicUrl";
 import { BillingEvents, Payments, Users } from "@/lib/server/db";
 import {
   applyStarsPayment,
@@ -14,30 +16,26 @@ import {
 } from "@/lib/billing/stars";
 import {
   answerPreCheckoutQuery,
+  ensureTelegramBotLazy,
   invoiceDescription,
   invoiceTitle,
   sanitizeTelegramError,
   sendStarsInvoice,
-  telegramConfigured,
+  telegramWebhookGate,
 } from "@/lib/billing/telegram";
 
 export const dynamic = "force-dynamic";
-
-function timingEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let x = 0;
-  for (let i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return x === 0;
-}
 
 function text(chatId: number, text: string) {
   return import("@/lib/billing/telegram").then((m) => m.telegramCall("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true }));
 }
 
 export async function POST(req: Request) {
-  if (!telegramConfigured() || !env.telegramWebhookSecret) return NextResponse.json({ ok: false }, { status: 503 });
-  const header = req.headers.get("x-telegram-bot-api-secret-token") ?? "";
-  if (!timingEqual(header, env.telegramWebhookSecret)) return NextResponse.json({ ok: false }, { status: 401 });
+  await getSettings();
+  const gate = telegramWebhookGate(req.headers.get("x-telegram-bot-api-secret-token") ?? "");
+  if (gate !== 200) return NextResponse.json({ ok: false }, { status: gate });
+  ensureTelegramBotLazy(req);
+  const site = publicSiteUrl(req);
 
   let update: Record<string, unknown>;
   try {
@@ -87,7 +85,7 @@ export async function POST(req: Request) {
         seenCharge: (id) => BillingEvents.has(`xtr:${id}`),
         markCharge: (id) => BillingEvents.add(`xtr:${id}`, "telegram_stars"),
       }, env.jwtSecret, { telegramUserId: message.from?.id });
-      await text(chatId, "تم الدفع بنجاح ✅ تم تفعيل اشتراكك في فروستلي. يمكنك العودة إلى الموقع: " + env.siteUrl + "/account?upgraded=1");
+      await text(chatId, "تم الدفع بنجاح ✅ تم تفعيل اشتراكك في فروستلي. يمكنك العودة إلى الموقع: " + site + "/account?upgraded=1");
       return NextResponse.json({ ok: true });
     }
 
@@ -96,9 +94,9 @@ export async function POST(req: Request) {
     const arg = raw.split(/\s+/).slice(1).join(" ").trim();
     if (chatId && (cmd === "/start" || cmd === "/paysupport" || cmd === "/terms")) {
       if (cmd === "/paysupport") {
-        await text(chatId, "دعم مدفوعات فروستلي:\nللدفع والاسترجاع راسلنا على wahmsec@gmail.com أو راجع سياسة الاسترجاع:\n" + env.siteUrl + "/refund");
+        await text(chatId, "دعم مدفوعات فروستلي:\nللدفع والاسترجاع راسلنا على wahmsec@gmail.com أو راجع سياسة الاسترجاع:\n" + site + "/refund");
       } else if (cmd === "/terms") {
-        await text(chatId, "شروط استخدام فروستلي:\n" + env.siteUrl + "/terms\n\nسياسة الاسترجاع (14 يوماً):\n" + env.siteUrl + "/refund");
+        await text(chatId, "شروط استخدام فروستلي:\n" + site + "/terms\n\nسياسة الاسترجاع (14 يوماً):\n" + site + "/refund");
       } else if (arg) {
         try {
           const data = verifyStarPayload(arg, env.jwtSecret);
@@ -112,12 +110,12 @@ export async function POST(req: Request) {
           });
         } catch (e) {
           const expired = e instanceof StarPayloadError && e.message === "expired";
-          await text(chatId, expired ? "انتهت صلاحية رابط الدفع. ارجع إلى صفحة الأسعار في الموقع وابدأ من جديد:\n" + env.siteUrl + "/pricing" : "رابط الدفع غير صالح. ابدأ الاشتراك من الموقع:\n" + env.siteUrl + "/pricing");
+          await text(chatId, expired ? "انتهت صلاحية رابط الدفع. ارجع إلى صفحة الأسعار في الموقع وابدأ من جديد:\n" + site + "/pricing" : "رابط الدفع غير صالح. ابدأ الاشتراك من الموقع:\n" + site + "/pricing");
         }
       } else {
         await text(
           chatId,
-          "أهلاً بك في بوت الدفع فروستلي ⭐\nمن هنا تدفع بنجوم Telegram لاشتراك برو أو أعمال.\n\nابدأ من صفحة الأسعار (لازم تكون مسجّل دخول):\n" + env.siteUrl + "/pricing",
+          "أهلاً بك في بوت الدفع فروستلي ⭐\nمن هنا تدفع بنجوم Telegram لاشتراك برو أو أعمال.\n\nابدأ من صفحة الأسعار (لازم تكون مسجّل دخول):\n" + site + "/pricing",
         );
       }
     }

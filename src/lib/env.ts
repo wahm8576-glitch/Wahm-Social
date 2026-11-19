@@ -14,7 +14,7 @@ function read(name: string, fallback = ""): string {
 
 export const env = {
   get siteUrl() {
-    return read("NEXT_PUBLIC_SITE_URL", read("RENDER_EXTERNAL_URL", "http://localhost:3000")).replace(/\/$/, "");
+    return read("SITE_URL", read("NEXT_PUBLIC_SITE_URL", read("RENDER_EXTERNAL_URL", "http://localhost:3000"))).replace(/\/$/, "");
   },
   get jwtSecret() {
     return read("JWT_SECRET", "wahm-dev-secret-change-me-please-0123456789");

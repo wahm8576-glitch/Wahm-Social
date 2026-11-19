@@ -2,6 +2,8 @@ import { adminAction } from "@/lib/admin/guard";
 import { SECRET_DEFS } from "@/lib/admin/secrets-def";
 import { saveSecrets } from "@/lib/site/store";
 import { validateProxyUrl } from "@/lib/admin/proxyTest";
+import { env } from "@/lib/env";
+import { deleteTelegramWebhook, ensureTelegramBot, sanitizeTelegramError } from "@/lib/billing/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ export async function POST(req: Request) {
   const page = new URL(req.url).searchParams.get("page") === "proxy" ? "proxy" : "keys";
   return adminAction(page, async (_req, form) => {
     let changed = 0;
+    const prevToken = env.telegramBotToken;
     await saveSecrets((cur) => {
       for (const d of SECRET_DEFS) {
         if (form.get(`clear_${d.key}`) === "on") {
@@ -29,6 +32,19 @@ export async function POST(req: Request) {
       }
       return cur;
     }, "admin: update secrets");
-    return changed ? `تم حفظ ${changed} قيمة (مشفّرة) ✅` : "ما تغيّر شي";
+    const nextToken = env.telegramBotToken;
+    let telegramNote = "";
+    if (prevToken && prevToken !== nextToken) {
+      await deleteTelegramWebhook(prevToken);
+    }
+    if (nextToken && (nextToken !== prevToken || String(form.get("telegramBotToken") ?? "").trim())) {
+      try {
+        const url = await ensureTelegramBot(true, _req);
+        if (url && !String(url).startsWith("skipped")) telegramNote = " — تم تسجيل ويب هوك Telegram";
+      } catch (e) {
+        telegramNote = ` — حُفظ التوكن لكن تسجيل الويب هوك فشل: ${sanitizeTelegramError(e)}`;
+      }
+    }
+    return changed ? `تم حفظ ${changed} قيمة (مشفّرة) ✅${telegramNote}` : "ما تغيّر شي";
   })(req);
 }

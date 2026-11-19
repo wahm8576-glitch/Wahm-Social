@@ -1,4 +1,5 @@
 import type { SiteSettings } from "../site/types";
+import { normalizeOrigin } from "../site/publicUrl";
 import { bi, bool, str } from "./formRead";
 import { ARTICLES } from "../content/blog";
 
@@ -51,6 +52,17 @@ export const EXTRA_PARSERS: Record<string, (s: SiteSettings, f: FormData) => Sit
   blog(s, f) {
     s.blog.enabled = bool(f, "enabled", s.blog.enabled);
     s.blog.hidden = ARTICLES.filter((a) => f.get(`show_${a.slug}__present`) && f.get(`show_${a.slug}`) !== "on").map((a) => a.slug);
+    return s;
+  },
+  publicUrl(s, f) {
+    const raw = str(f, "publicUrl", 300);
+    if (!raw) {
+      s.publicUrl = "";
+      return s;
+    }
+    const origin = normalizeOrigin(raw);
+    if (!origin) throw new Error("عنوان الموقع العام غير صالح — استخدم https://example.com");
+    s.publicUrl = origin;
     return s;
   },
 };

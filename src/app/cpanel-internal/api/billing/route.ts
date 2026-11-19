@@ -1,7 +1,7 @@
 import { adminAction, back } from "@/lib/admin/guard";
 import { Users, Payments } from "@/lib/server/db";
 import { grantPatch, GrantError, type GrantDuration } from "@/lib/billing/admin-grant";
-import { refundStarPayment, sanitizeTelegramError } from "@/lib/billing/telegram";
+import { ensureTelegramBot, refundStarPayment, sanitizeTelegramError, telegramConfigured } from "@/lib/billing/telegram";
 import type { PlanId } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,13 @@ const DURATIONS: GrantDuration[] = ["month", "year", "days", "until"];
 
 export async function POST(req: Request) {
   return adminAction("billing", async (r, form) => {
+    if (String(form.get("op") ?? "") === "register_telegram_webhook") {
+      if (!telegramConfigured()) throw new Error("حط توكن البوت أولاً في صفحة المفاتيح");
+      const url = await ensureTelegramBot(true, r);
+      if (!url || String(url).startsWith("skipped")) throw new Error("تعذر تسجيل الويب هوك");
+      return back(r, "billing", { ok: `تم تسجيل ويب هوك Telegram: ${url}` });
+    }
+
     const email = String(form.get("email") ?? "").trim().toLowerCase();
     if (!email) throw new Error("أدخل بريد المستخدم");
     const user = Users.byEmail(email);

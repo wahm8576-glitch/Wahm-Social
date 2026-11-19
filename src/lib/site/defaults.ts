@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   version: 1,
   updatedAt: "",
   relayUrl: "",
+  publicUrl: "",
   brand: {
     siteName: { ar: ar.brand, en: en.brand },
     tagline: { ar: ar.tagline, en: en.tagline },

@@ -114,6 +114,11 @@ export interface SiteSettings {
   updatedAt: string;
   /** Cloudflare Worker base URL (RELAY_URL). Empty = use the Render env value. */
   relayUrl: string;
+  /**
+   * Optional public site origin (https://example.com), no trailing slash.
+   * Empty = derive from SITE_URL, the request host, or the current platform URL.
+   */
+  publicUrl: string;
   brand: BrandSettings;
   texts: TextSettings;
   seo: SeoSettings;
@@ -128,4 +133,4 @@ export interface SiteSettings {
   blog: BlogSettings;
 }
 
-export type SettingsSection = "brand" | "texts" | "seo" | "features" | "theme" | "assets" | "relay" | "limits" | "maintenance" | "head" | "contact" | "pages" | "blog";
+export type SettingsSection = "brand" | "texts" | "seo" | "features" | "theme" | "assets" | "relay" | "limits" | "maintenance" | "head" | "contact" | "pages" | "blog" | "publicUrl";

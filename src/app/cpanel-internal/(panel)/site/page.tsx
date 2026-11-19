@@ -19,6 +19,10 @@ export default async function SitePage({ searchParams }: { searchParams: Flashy 
   const { base, settings: s } = await guardPage();
   return (
     <PanelShell active="site" title="الصيانة والتحليلات والتواصل" flash={searchParams}>
+      <FormSection title="🌐 عنوان الموقع العام" desc="اختياري. إذا ضبطته يُستخدم لروابط العودة في PayPal ولويب هوك Telegram. إذا فاضي، يُشتق تلقائياً من عنوان الطلب أو عنوان الاستضافة (مثل Render)، فالنقل لدومين أو سيرفر جديد يحدّث الويب هوك وحده." action={`${base}/api/save?section=publicUrl`}>
+        <Text name="publicUrl" label="عنوان الموقع العام (https://…)" value={s.publicUrl} dir="ltr" placeholder="اتركه فاضي للاكتشاف التلقائي" />
+        <Submit />
+      </FormSection>
       <FormSection title="🛠️ وضع الصيانة" desc="إذا تشغّل، كل صفحات الموقع تعرض رسالتك وواجهات البحث ترجع 503. لوحة التحكم تبقى شغالة." action={`${base}/api/save?section=maintenance`}>
         <Toggle name="enabled" label="تشغيل وضع الصيانة" checked={s.maintenance.enabled} />
         <BiText name="message" label="رسالة الصيانة" value={s.maintenance.message} area />

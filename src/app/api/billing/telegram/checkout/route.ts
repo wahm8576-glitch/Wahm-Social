@@ -18,12 +18,14 @@ import {
   signStarPayload,
   starPriceKey,
 } from "@/lib/billing/stars";
-import { createStarsInvoiceLink, invoiceDescription, invoiceTitle, telegramBotUsername, telegramConfigured, sanitizeTelegramError } from "@/lib/billing/telegram";
+import { createStarsInvoiceLink, ensureTelegramBotLazy, invoiceDescription, invoiceTitle, telegramBotUsername, telegramConfigured, sanitizeTelegramError } from "@/lib/billing/telegram";
 
 const Body = z.object({ plan: z.enum(["pro", "business"]), interval: z.enum(["month", "year"]) });
 
 export const POST = handler(async (req: Request) => {
   requireFeatureOn("pro");
+  await getSettings();
+  ensureTelegramBotLazy(req);
   if (!telegramConfigured()) throw new PlatformError("internal", "Telegram Stars are not configured", 503);
   const user = await requireUser();
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
@@ -32,7 +34,7 @@ export const POST = handler(async (req: Request) => {
   const settings = await getSettings();
   const stars = effectiveStarPrices(settings.features.starPrices, settings.features.prices)[starPriceKey(plan, interval)];
   const payload = signStarPayload(newStarPayload({ userId: user.id, plan, interval, stars }), env.jwtSecret);
-  const fallback = deepLink(telegramBotUsername(), payload);
+  const fallback = deepLink(await telegramBotUsername(), payload);
   try {
     const link = await createStarsInvoiceLink({
       title: invoiceTitle(plan, interval),

@@ -12,6 +12,7 @@ import { Banner } from "@/components/layout/Banner";
 import { currentUser, publicUser } from "@/lib/server/auth";
 import { WelcomeToast } from "@/components/auth/WelcomeToast";
 import { env, telegramStarsConfigured } from "@/lib/env";
+import { ensureTelegramBotLazy } from "@/lib/billing/telegram";
 import { jsonLdOrganization, jsonLdWebsite } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { getSettings } from "@/lib/site/store";
@@ -42,6 +43,7 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const s = await getSettings();
+  ensureTelegramBotLazy({ headers: headers() });
   const { locale, t } = getDict();
   const isPanel = headers().get("x-frostly-cp") === "1";
   const user = isPanel ? null : await currentUser();

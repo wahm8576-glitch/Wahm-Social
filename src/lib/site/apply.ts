@@ -9,7 +9,7 @@ import { applyPools } from "../pools/apply";
 
 const g = globalThis as unknown as { __frostlyEnvOrig?: Record<string, string | undefined> };
 
-const MANAGED = [...SECRET_DEFS.map((d) => d.env), "DEMO_MODE", "RELAY_URL"];
+const MANAGED = [...SECRET_DEFS.map((d) => d.env), "DEMO_MODE", "RELAY_URL", "SITE_URL"];
 
 function originals() {
   if (!g.__frostlyEnvOrig) {
@@ -29,6 +29,7 @@ export function applyOverrides(settings: SiteSettings, secrets: Record<string, s
   for (const d of SECRET_DEFS) setEnv(d.env, secrets[d.key] ? secrets[d.key] : orig[d.env]);
   setEnv("DEMO_MODE", settings.features.demoMode || orig.DEMO_MODE);
   setEnv("RELAY_URL", settings.relayUrl || orig.RELAY_URL);
+  setEnv("SITE_URL", settings.publicUrl || orig.SITE_URL);
   setPriceOverrides(settings.features.prices);
   applyPools(secrets);
 }
