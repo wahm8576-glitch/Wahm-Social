@@ -19,8 +19,13 @@ export const GET = handler(async (req: Request) => {
     try {
       const p = await getProfile(w.platform, w.username);
       const prev = w.lastFollowers;
-      if (p.source !== "demo") Watchlist.touch(w.id, p.data.followers);
-      return { ...w, current: { followers: p.data.followers, avatarUrl: p.data.avatarUrl, displayName: p.data.displayName, delta: prev ? p.data.followers - prev : 0 } };
+      if (p.source !== "demo" && !p.data.isPrivate) Watchlist.recordSnapshot(w.id, {
+        followers: p.data.followers,
+        ...(typeof p.data.likes === "number" ? { likes: p.data.likes } : {}),
+        postsCount: p.data.postsCount,
+      });
+      const latest = Watchlist.forUser(user.id).find((item) => item.id === w.id) ?? w;
+      return { ...latest, current: { followers: p.data.followers, avatarUrl: p.data.avatarUrl, displayName: p.data.displayName, delta: typeof prev === "number" ? p.data.followers - prev : 0, demo: p.source === "demo" } };
     } catch {
       return { ...w, current: null };
     }
