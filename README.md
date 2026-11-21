@@ -14,7 +14,7 @@ Built with **Next.js 14 (App Router) + TypeScript + Tailwind**, deployed as a si
 - Followers/following: per-account privacy gate (public / hidden / private). TikTok lists load via the official TikTok Research API when `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET` are set; otherwise counts + "open on TikTok". Instagram lists are login-only.
 - Instagram: public link-preview fallback for profile name/avatar/counts and single posts when the web API is blocked
 - Analytics: engagement rate, averages, posting frequency, best day/hour, top hashtags, earnings estimate, Frost score
-- Pro: batch download, compare accounts, watchlist, CSV export, advanced analytics; Business: API keys
+- Pro: batch download, compare accounts, watchlist with public growth history, CSV export, advanced analytics; Business: API keys
 - Auth: email/password + JWT httpOnly cookie, magic-link stub; per-plan daily quotas; burst rate limiting
 - Billing: mock mode by default; Stripe Checkout + signed webhook when keys are set
 - Admin dashboard, AR/EN i18n with RTL, icy glassmorphism design with light ("sugar") and dark ("frost") themes
@@ -50,6 +50,8 @@ tests/                 node:test unit tests for parsers/analytics
 Instagram heavily rate-limits datacenter IPs. When blocked, `DEMO_MODE=auto` serves clearly-labelled demo data so the UI stays usable. For production reliability set `IG_SESSIONID` and/or `SCRAPER_PROXY`.
 
 Private accounts, DMs, and follower lists are **never** bypassed.
+
+Watchlist growth snapshots are captured when the list is opened or refreshed, at most once per UTC day per account. They use only public profile metrics and are not collected by a background scheduler.
 
 ## Env vars
 See `.env.example`. Key ones: `JWT_SECRET`, `NEXT_PUBLIC_SITE_URL`, `ADMIN_EMAILS`, `IG_SESSIONID`, `STRIPE_*`, `DEMO_MODE`, `DATA_DIR`.

@@ -12,6 +12,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { env } from "../env";
 import type { Platform } from "../platforms/types";
+import { appendDailyGrowth, type GrowthPoint } from "../growth";
 import type { PlanId } from "../plans";
 import { applyRedeemToState, type ActivationBatch, type ActivationCode } from "../billing/codes";
 import { Mirror, mergeRows, normEmail, type CollName, type MirrorSpec, type RemoteBackend } from "./mirror";
@@ -42,6 +43,7 @@ export interface WatchItem {
   addedAt: number;
   lastFollowers?: number;
   lastCheckedAt?: number;
+  growth?: GrowthPoint[];
 }
 
 export interface UsageRecord {
@@ -269,13 +271,20 @@ export const Watchlist = {
       d.watchlist = d.watchlist.filter((w) => !(w.userId === userId && w.id === id));
     });
   },
-  touch(id: string, followers: number) {
+  recordSnapshot(id: string, metrics: Omit<GrowthPoint, "at"> & { at?: number }) {
     db.mutate((d) => {
       const w = d.watchlist.find((x) => x.id === id);
-      if (w) {
-        w.lastFollowers = followers;
-        w.lastCheckedAt = Date.now();
-      }
+      if (!w) return;
+      const at = metrics.at ?? Date.now();
+      const point: GrowthPoint = {
+        at,
+        followers: metrics.followers,
+        ...(typeof metrics.likes === "number" ? { likes: metrics.likes } : {}),
+        ...(typeof metrics.postsCount === "number" ? { postsCount: metrics.postsCount } : {}),
+      };
+      w.growth = appendDailyGrowth(w.growth, point);
+      w.lastFollowers = metrics.followers;
+      w.lastCheckedAt = at;
     });
   },
 };

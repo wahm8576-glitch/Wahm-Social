@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { Platform } from "@/lib/platforms/types";
 import { compact, timeAgo } from "@/lib/format";
+import type { GrowthPoint } from "@/lib/growth";
 import { useI18n } from "../I18nProvider";
 import { Avatar, EmptyState, PlatformIcon } from "../ui";
+import { GrowthHistory } from "./GrowthHistory";
 
 interface Row {
   id: string;
@@ -13,7 +15,8 @@ interface Row {
   username: string;
   lastFollowers?: number;
   lastCheckedAt?: number;
-  current: null | { followers: number; avatarUrl: string; displayName: string; delta: number };
+  growth?: GrowthPoint[];
+  current: null | { followers: number; avatarUrl: string; displayName: string; delta: number; demo: boolean };
 }
 
 export function WatchlistView() {
@@ -67,6 +70,7 @@ export function WatchlistView() {
           {rows?.length ?? 0}/{limit}
         </span>
       </form>
+      <p className="mb-4 text-xs text-ink-4">{t.watchlist.samplingNote}</p>
       {rows === null ? (
         <div className="skeleton h-40" />
       ) : rows.length === 0 ? (
@@ -74,28 +78,31 @@ export function WatchlistView() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {rows.map((r) => (
-            <div key={r.id} className="card flex items-center gap-4 p-4">
-              <Avatar src={r.current?.avatarUrl} alt={r.username} size={56} />
-              <div className="min-w-0 flex-1">
-                <Link href={`/${r.platform}/${r.username}`} className="flex items-center gap-1 font-bold text-ink hover:text-accent-300" dir="ltr">
-                  <PlatformIcon platform={r.platform} className="h-3.5 w-3.5" />@{r.username}
-                </Link>
-                <div className="text-sm text-ink-2">
-                  {compact(r.current?.followers ?? r.lastFollowers, locale)} {t.profile.followers}
-                  {r.current && r.current.delta !== 0 && (
-                    <span className={r.current.delta > 0 ? "ms-2 text-emerald-400" : "ms-2 text-rose-400"} dir="ltr">
-                      {r.current.delta > 0 ? "+" : ""}
-                      {compact(r.current.delta, "en")}
-                    </span>
-                  )}
+            <div key={r.id} className="card p-4">
+              <div className="flex items-center gap-4">
+                <Avatar src={r.current?.avatarUrl} alt={r.username} size={56} />
+                <div className="min-w-0 flex-1">
+                  <Link href={`/${r.platform}/${r.username}`} className="flex items-center gap-1 font-bold text-ink hover:text-accent-300" dir="ltr">
+                    <PlatformIcon platform={r.platform} className="h-3.5 w-3.5" />@{r.username}
+                  </Link>
+                  <div className="text-sm text-ink-2">
+                    {compact(r.current?.followers ?? r.lastFollowers, locale)} {t.profile.followers}
+                    {r.current && r.current.delta !== 0 && (
+                      <span className={r.current.delta > 0 ? "ms-2 text-emerald-400" : "ms-2 text-rose-400"} dir="ltr">
+                        {r.current.delta > 0 ? "+" : ""}
+                        {compact(r.current.delta, "en")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-ink-4">
+                    {t.watchlist.lastCheck}: {timeAgo(r.lastCheckedAt, locale)}
+                  </div>
                 </div>
-                <div className="text-xs text-ink-4">
-                  {t.watchlist.lastCheck}: {timeAgo(r.lastCheckedAt, locale)}
-                </div>
+                <button className="btn-ghost btn-sm" onClick={() => remove(r.id)}>
+                  {t.watchlist.remove}
+                </button>
               </div>
-              <button className="btn-ghost btn-sm" onClick={() => remove(r.id)}>
-                {t.watchlist.remove}
-              </button>
+              <GrowthHistory history={r.growth ?? []} demo={r.current?.demo ?? false} t={t} locale={locale} />
             </div>
           ))}
         </div>
