@@ -1,0 +1,57 @@
+name: Build Frostly iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ios-app
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-ipa.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-unsigned-ipa:
+    name: Build unsigned iPhone app
+    runs-on: macos-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec ios/project.yml --project ios
+
+      - name: Build for iOS device (unsigned)
+        run: >-
+          xcodebuild
+          -project ios/Frostly.xcodeproj
+          -scheme Frostly
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/FrostlyDerived"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Package IPA for ESign
+        run: |
+          APP_PATH="$RUNNER_TEMP/FrostlyDerived/Build/Products/Release-iphoneos/Frostly.app"
+          test -d "$APP_PATH"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/Frostly.app"
+          cd "$RUNNER_TEMP/ipa"
+          ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/Frostly-unsigned.ipa"
+          test -s "$GITHUB_WORKSPACE/Frostly-unsigned.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frostly-unsigned-ipa
+          path: Frostly-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

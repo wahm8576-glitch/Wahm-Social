@@ -1,0 +1,35 @@
+name: Frostly
+options:
+  bundleIdPrefix: com.wahm
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    PRODUCT_BUNDLE_IDENTIFIER: com.wahm.frostly
+    PRODUCT_NAME: Frostly
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    INFOPLIST_FILE: Frostly/Info.plist
+    GENERATE_INFOPLIST_FILE: "NO"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_EMIT_LOC_STRINGS: "YES"
+
+targets:
+  Frostly:
+    type: application
+    platform: iOS
+    sources:
+      - path: Frostly
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wahm.frostly
+        INFOPLIST_FILE: Frostly/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
