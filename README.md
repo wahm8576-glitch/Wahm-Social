@@ -46,8 +46,9 @@ tests/                 node:test unit tests for parsers/analytics
 | Instagram | Profile + 12 posts | `web_profile_info` public endpoint |
 | Instagram | Single post | `/p/{code}/embed/captioned/` |
 | Instagram | Stories | `reels_media` (requires `IG_SESSIONID` of a server-owned account; public accounts only) |
+| Instagram | Post comments | private comments endpoint (requires a valid server-side `IG_SESSIONID`; unofficial and may be blocked) |
 
-Instagram heavily rate-limits datacenter IPs. When blocked, `DEMO_MODE=auto` serves clearly-labelled demo data so the UI stays usable. For production reliability set `IG_SESSIONID` and/or `SCRAPER_PROXY`.
+Instagram heavily rate-limits datacenter IPs. When blocked, `DEMO_MODE=auto` serves clearly-labelled demo data so the UI stays usable. Post comments require a valid server-side `IG_SESSIONID`; this is an unofficial endpoint, not Meta's supported public-comments API, and may be blocked or change. For production reliability set `IG_SESSIONID` and/or `SCRAPER_PROXY`.
 
 Private accounts, DMs, and follower lists are **never** bypassed.
 

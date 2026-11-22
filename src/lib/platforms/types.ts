@@ -142,6 +142,23 @@ export interface ConnectionsResult {
   attempts?: ConnectionAttempt[];
 }
 
+export interface PostComment {
+  id: string;
+  text: string;
+  authorName?: string;
+  username?: string;
+  likes?: number;
+}
+
+export interface PostCommentsResult {
+  status: "available" | "empty" | "unavailable" | "session_required";
+  comments: PostComment[];
+  /** True only when each returned comment has a like count. */
+  rankedByLikes: boolean;
+  /** Number of comments inspected before keeping the top five. */
+  sampleSize: number;
+}
+
 export interface Envelope<T> {
   ok: true;
   source: DataSource;
@@ -178,5 +195,6 @@ export interface PlatformAdapter {
   getProfile(username: string): Promise<Profile>;
   getPosts(username: string, opts?: { limit?: number }): Promise<Post[]>;
   getPost(idOrUrl: string, username?: string): Promise<Post>;
+  getComments(post: Post): Promise<PostCommentsResult>;
   getStories(username: string): Promise<Story[]>;
 }

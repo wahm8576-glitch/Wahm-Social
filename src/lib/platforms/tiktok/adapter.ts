@@ -9,8 +9,10 @@ import "server-only";
  *  - tikwm user/info, user/story, /api/?url=  (last resort before demo)
  */
 import { cookiesFrom, extractScriptJson, httpGet, looksLikeBotWall } from "../../server/http";
-import { PlatformError, type PlatformAdapter, type Post, type Profile, type Story } from "../types";
+import { PlatformError, type PlatformAdapter, type Post, type PostCommentsResult, type Profile, type Story } from "../types";
 import { parseEmbedState, parseTikTokRef, parseUserDetail, parseVideoDetail } from "./parser";
+import { parseTikTokComments } from "./comments";
+import { topComments, unavailableComments } from "../comments";
 import { mapLimit } from "../../server/concurrency";
 import { countikLanguage } from "./countik";
 import { tikwmPost, tikwmStories } from "./tikwm";
@@ -22,6 +24,20 @@ import { freeVideo, tiktokApiStories } from "./free";
 
 const BASE = "https://www.tiktok.com";
 const LOCATION_WAIT_MS = 6000;
+const videoPageCookies = new Map<string, { value: string; at: number }>();
+const videoCookieKey = (username: string, id: string) => `${username.toLowerCase()}:${id}`;
+
+function rememberVideoPageCookie(username: string, id: string, value: string) {
+  const key = videoCookieKey(username, id);
+  videoPageCookies.set(key, { value, at: Date.now() });
+  if (videoPageCookies.size > 1000) videoPageCookies.delete(videoPageCookies.keys().next().value as string);
+}
+
+function recentVideoPageCookie(username: string, id: string): string | undefined {
+  const entry = videoPageCookies.get(videoCookieKey(username, id));
+  if (!entry || Date.now() - entry.at > 10 * 60_000) return undefined;
+  return entry.value;
+}
 
 /** Background country result → fill the cached profile so the next view shows it without waiting. */
 function patchCachedProfileLocation(username: string, loc: NonNullable<Profile["location"]>) {
@@ -53,7 +69,34 @@ export async function fetchVideoPage(username: string, id: string): Promise<{ po
   if (!json) throw new PlatformError("blocked", "TikTok returned an unexpected page", 503);
   const { status, post } = parseVideoDetail(json);
   if (status !== 0 || !post) throw new PlatformError("not_found", "Video not found or not public", 404);
-  return { post, cookie: cookiesFrom(res.headers) };
+  const cookie = cookiesFrom(res.headers);
+  rememberVideoPageCookie(username || "i", id, cookie);
+  return { post, cookie };
+}
+
+async function fetchPostComments(post: Post): Promise<PostCommentsResult> {
+  try {
+    // Public page cookies are only used to make the matching public comment request.
+    const author = post.author || "i";
+    const cookie = recentVideoPageCookie(author, post.id) ?? await fetchVideoPage(author, post.id).then((r) => r.cookie).catch(() => "");
+    const params = new URLSearchParams({ aid: "1988", aweme_id: post.id, count: "50", cursor: "0" });
+    const res = await httpGet(`https://www.tiktok.com/api/comment/list/?${params.toString()}`, {
+      retries: 0,
+      timeoutMs: 9000,
+      headers: {
+        accept: "application/json, text/plain, */*",
+        referer: post.url,
+        ...(cookie ? { cookie } : {}),
+      },
+    });
+    if (res.status !== 200 || !res.text.trimStart().startsWith("{")) return unavailableComments();
+    const payload = JSON.parse(res.text);
+    if (payload?.status_code !== undefined && Number(payload.status_code) !== 0) return unavailableComments();
+    const comments = parseTikTokComments(payload);
+    return comments ? topComments(comments, 5) : unavailableComments();
+  } catch {
+    return unavailableComments();
+  }
 }
 
 async function resolveShortUrl(url: string): Promise<{ id?: string; username?: string }> {
@@ -201,6 +244,10 @@ export const tiktok: PlatformAdapter & {
       if (fb.ok) return fb.data;
       throw e;
     }
+  },
+
+  async getComments(post) {
+    return fetchPostComments(post);
   },
 
   async getStories(username): Promise<Story[]> {

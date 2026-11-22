@@ -131,6 +131,14 @@ export async function getPost(platform: Platform, ref: string, username?: string
   return { data, source: fromCache ? "cache" : "live" };
 }
 
+/** Comments load separately so a blocked comments endpoint never prevents the post from appearing. */
+export async function getPostComments(platform: Platform, ref: string, username?: string) {
+  const post = await getPost(platform, ref, username);
+  const key = `post-comments:${platform}:${post.data.id}:v1`;
+  const [data, fromCache] = await cached(key, 10 * 60_000, () => adapters[platform].getComments(post.data));
+  return { data, source: fromCache ? "cache" as const : "live" as const };
+}
+
 const IG_STORIES_NOTICE =
   "انستقرام رفض طلب الستوري من السيرفر الحين (حظر/حد طلبات على البروكسي أو الجلسة تحتاج تسجيل دخول جديد). ما نعرض بيانات وهمية — جرّب بعد شوي. Instagram refused the story request from our server (proxy rate-limited or the session needs re-login). No fake data is shown — try again shortly.";
 
