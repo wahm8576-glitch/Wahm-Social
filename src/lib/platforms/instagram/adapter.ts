@@ -12,8 +12,10 @@ import { httpGet } from "../../server/http";
 import { hasSession, type IgClient } from "./session/cookies";
 import { igJson, type IgAttempt } from "./session/api";
 import { recordIg } from "./session/diagnostics";
-import { PlatformError, type PlatformAdapter, type Post, type Profile, type Story } from "../types";
+import { PlatformError, type PlatformAdapter, type Post, type PostCommentsResult, type Profile, type Story } from "../types";
 import { parseEmbedHtml, parseInstagramRef, parseReelsMedia, parseWebProfile } from "./parser";
+import { parseInstagramComments } from "./comments";
+import { topComments, unavailableComments } from "../comments";
 import { fetchPreview, PREVIEW_TRIES } from "./preview/fetch";
 import { parseOgPost, parseOgProfile } from "./preview/parse";
 import { parseV1Media, parseV1User, pickSearchUser } from "./session/v1";
@@ -364,6 +366,20 @@ export const instagram: PlatformAdapter = {
     const o = await oembedPost(shortcode);
     if (o) return o;
     throw new PlatformError("blocked", "Instagram did not return this post's media right now (rate-limited). Please try again shortly.", 503);
+  },
+
+  async getComments(post): Promise<PostCommentsResult> {
+    if (!hasSession()) return unavailableComments("session_required");
+    const shortcode = post.shortcode ?? post.id;
+    const mediaId = /^\d{5,}$/.test(post.id) ? post.id : shortcodeToId(shortcode);
+    const url = `https://i.instagram.com/api/v1/media/${encodeURIComponent(mediaId)}/comments/?can_support_threading=true&permalink_enabled=false`;
+    for (const client of ["app-session", "web-session"] as IgClient[]) {
+      const r = await igJson(url, client, post.url);
+      if (!r.ok) continue;
+      const comments = parseInstagramComments(r.json);
+      if (comments) return topComments(comments, 5);
+    }
+    return unavailableComments();
   },
 
   async getStories(username): Promise<Story[]> {

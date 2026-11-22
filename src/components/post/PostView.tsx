@@ -5,6 +5,7 @@ import { compact, date, duration } from "@/lib/format";
 import { downloadHref, profileHref, proxied, streamHref } from "@/lib/mediaUrl";
 import { Badge, PlatformIcon } from "../ui";
 import { CopyButton } from "./CopyButton";
+import { PostCommentsPanel } from "./PostCommentsPanel";
 
 export function PostView({ post, t, locale }: { post: Post; t: Dict; locale: Locale }) {
   const ref = post.platform === "tiktok" ? post.id : post.shortcode ?? post.id;
@@ -63,6 +64,7 @@ export function PostView({ post, t, locale }: { post: Post; t: Dict; locale: Loc
             ))}
           </div>
         )}
+        <PostCommentsPanel platform={post.platform} postRef={ref} username={post.author} labels={t.post} locale={locale} />
         <div className="card mt-6 p-5">
           <div className="mb-3 flex items-center gap-2">
             <h2 className="font-bold text-ink">{t.post.download}</h2>
