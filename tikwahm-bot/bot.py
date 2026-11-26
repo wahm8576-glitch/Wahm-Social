@@ -8,14 +8,16 @@ import html
 import json
 import os
 import re
+import secrets
 import shutil
 import time
+import urllib.request
 from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 import uvicorn
 
 from telebot import asyncio_helper, types
@@ -531,9 +533,153 @@ def _load_proxy_pool(path: str):
     return proxies
 
 
-_PROXY_POOL = _load_proxy_pool(PROXY_LIST_PATH)
+PROXY_DASHBOARD_FILE = os.environ.get(
+    "TIKWAHM_PROXY_DASHBOARD_FILE",
+    os.path.join(os.path.dirname(__file__), "proxy_dashboard.json"),
+).strip()
+
+
+def _parse_proxy_source_line(raw_line: str):
+    line = raw_line.strip()
+    enabled = True
+    if line.casefold().startswith("# disabled:"):
+        enabled = False
+        line = line.split(":", 1)[1].strip()
+    elif not line or line.startswith("#"):
+        return None
+    parts = line.split(":", 3)
+    if len(parts) != 4:
+        return None
+    host, port, username, password = parts
+    if (
+        not host or not re.fullmatch(r"[A-Za-z0-9.-]+", host)
+        or ".." in host or not port.isdigit() or not username or not password
+        or any(char in username + password for char in "\r\n\x00")
+    ):
+        return None
+    port_number = int(port)
+    if not 1 <= port_number <= 65535:
+        return None
+    return {
+        "id": secrets.token_urlsafe(12),
+        "host": host.rstrip("."),
+        "port": port_number,
+        "username": username,
+        "password": password,
+        "enabled": enabled,
+    }
+
+
+def _load_proxy_admin_entries(path: str):
+    try:
+        encoded = os.environ.get("TIKWAHM_PROXY_LIST_B64", "").strip()
+        if encoded:
+            content = base64.b64decode(encoded, validate=True).decode("utf-8")
+        else:
+            with open(path, "r", encoding="utf-8") as proxy_file:
+                content = proxy_file.read()
+    except (OSError, ValueError, UnicodeError):
+        return []
+    entries = []
+    for raw_line in content.splitlines():
+        parsed = _parse_proxy_source_line(raw_line)
+        if parsed is not None:
+            entries.append(parsed)
+    return entries
+
+
+def _load_proxy_dashboard_state():
+    try:
+        with open(PROXY_DASHBOARD_FILE, "r", encoding="utf-8") as state_file:
+            payload = json.load(state_file)
+        entries = payload.get("proxies") if isinstance(payload, dict) else None
+        if not isinstance(entries, list):
+            return None
+        loaded = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return None
+            parsed = _parse_proxy_source_line(
+                f"{entry.get('host', '')}:{entry.get('port', '')}:"
+                f"{entry.get('username', '')}:{entry.get('password', '')}"
+            )
+            if parsed is None:
+                return None
+            proxy_id = str(entry.get("id", ""))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", proxy_id):
+                proxy_id = secrets.token_urlsafe(12)
+            parsed["id"] = proxy_id
+            parsed["enabled"] = bool(entry.get("enabled", True))
+            loaded.append(parsed)
+        return loaded
+    except (OSError, ValueError, UnicodeError, TypeError):
+        return None
+
+
+_PROXY_ADMIN_ENTRIES = _load_proxy_dashboard_state()
+if _PROXY_ADMIN_ENTRIES is None:
+    _PROXY_ADMIN_ENTRIES = _load_proxy_admin_entries(PROXY_LIST_PATH)
+_PROXY_POOL = [dict(proxy) for proxy in _PROXY_ADMIN_ENTRIES if proxy.get("enabled", True)]
 _ACTIVE_PROXY_INDEX = 0
 _PROXY_LOCK = asyncio.Lock()
+
+
+async def _save_proxy_admin_entries(entries):
+    """Atomically store the credential-bearing pool in a private runtime file and refresh the live pool."""
+    global _PROXY_ADMIN_ENTRIES, _PROXY_POOL, _ACTIVE_PROXY_INDEX
+    parent = os.path.dirname(PROXY_DASHBOARD_FILE) or "."
+    os.makedirs(parent, exist_ok=True)
+    temp_path = f"{PROXY_DASHBOARD_FILE}.{secrets.token_hex(8)}.tmp"
+    payload = {"version": 1, "saved_at": int(time.time()), "proxies": entries}
+    try:
+        descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
+            json.dump(payload, state_file, ensure_ascii=False, separators=(",", ":"))
+            state_file.flush()
+            os.fsync(state_file.fileno())
+        os.replace(temp_path, PROXY_DASHBOARD_FILE)
+        os.chmod(PROXY_DASHBOARD_FILE, 0o600)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
+
+    source_lines = []
+    for proxy in entries:
+        line = f"{proxy['host']}:{proxy['port']}:{proxy['username']}:{proxy['password']}"
+        source_lines.append(line if proxy.get("enabled", True) else f"# disabled: {line}")
+    encoded = base64.b64encode(("\n".join(source_lines) + ("\n" if source_lines else "")).encode("utf-8")).decode("ascii")
+    async with _PROXY_LOCK:
+        _PROXY_ADMIN_ENTRIES = [dict(proxy) for proxy in entries]
+        _PROXY_POOL = [dict(proxy) for proxy in entries if proxy.get("enabled", True)]
+        _ACTIVE_PROXY_INDEX = 0
+        os.environ["TIKWAHM_PROXY_LIST_B64"] = encoded
+
+
+async def _test_proxy_connection(proxy):
+    def check():
+        proxy_url = (
+            f"http://{quote(proxy['username'], safe='')}:{quote(proxy['password'], safe='')}"
+            f"@{proxy['host']}:{proxy['port']}"
+        )
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+        )
+        request = urllib.request.Request(
+            "https://api.ipify.org?format=json",
+            headers={"User-Agent": "TikWahm-Proxy-Check/1.0"},
+        )
+        try:
+            with opener.open(request, timeout=12) as response:
+                data = json.loads(response.read(512).decode("utf-8", "replace"))
+            ip = str(data.get("ip", ""))
+            return {"ok": bool(ip), "ip": ip[:80]}
+        except Exception as exc:
+            return {"ok": False, "reason": type(exc).__name__}
+
+    return await asyncio.to_thread(check)
 
 _CONNECTION_FAILURE_MARKERS = (
     "err_proxy_connection_failed",
@@ -1248,6 +1394,40 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="TikWahm Test Bot", lifespan=lifespan)
+
+from proxy_admin import DEFAULT_PASSWORD_HASH, build_proxy_admin_router
+
+_PROXY_ADMIN_PASSWORD_HASH = (
+    os.environ.get("TIKWAHM_PROXY_DASHBOARD_PASSWORD_HASH", "").strip()
+    or DEFAULT_PASSWORD_HASH
+)
+app.include_router(
+    build_proxy_admin_router(
+        get_entries=lambda: [dict(proxy) for proxy in _PROXY_ADMIN_ENTRIES],
+        save_entries=_save_proxy_admin_entries,
+        get_session_secret=lambda: WEBHOOK_SECRET or WEBHOOK_SECRET_SEED or BOT_TOKEN,
+        test_proxy=_test_proxy_connection,
+        password_hash=_PROXY_ADMIN_PASSWORD_HASH,
+        password_pepper=lambda: BOT_TOKEN,
+    )
+)
+
+@app.middleware("http")
+async def proxy_admin_security_headers(request: Request, call_next):
+    if request.url.path.startswith("/proxy-admin"):
+        forwarded_scheme = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+        scheme = forwarded_scheme or request.url.scheme
+        if scheme != "https":
+            return PlainTextResponse("HTTPS is required for the proxy dashboard.", status_code=400)
+    response = await call_next(request)
+    if request.url.path.startswith("/proxy-admin"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)

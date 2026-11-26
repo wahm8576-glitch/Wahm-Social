@@ -3,5 +3,7 @@
 proxy_pool.txt
 proxy*.txt
 Webshare*.txt
+proxy_dashboard.json
+proxy_dashboard.json.*
 __pycache__/
 *.py[cod]
