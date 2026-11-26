@@ -1,0 +1,8 @@
+.env
+.env.*
+proxy_pool.txt
+proxy*.txt
+Webshare*.txt
+__pycache__/
+*.py[cod]
+.git/
