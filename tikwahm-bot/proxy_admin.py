@@ -525,7 +525,7 @@ def build_proxy_admin_router(
         for entry in get_entries():
             line = f"{entry['host']}:{entry['port']}:{entry['username']}:{entry['password']}"
             lines.append(line if entry.get("enabled", True) else f"# disabled: {line}")
-        plain = "\n".join(lines) + ("\n" if lines else "")
+        plain = "\n".join(lines) + "\n" if lines else "# empty proxy list\n"
         encoded = base64.b64encode(plain.encode("utf-8")).decode("ascii")
         return PlainTextResponse(encoded, headers=SECURITY_HEADERS)
 
