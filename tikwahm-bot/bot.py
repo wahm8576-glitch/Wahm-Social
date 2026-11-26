@@ -467,7 +467,6 @@ _PROVIDER_DENIAL_MARKERS = (
     "security check",
     "security challenge",
     "robot check",
-    "cloudflare",
 )
 _PROVIDER_RESTRICTION_MESSAGE = (
     "المصدر أبلغ عن حظر أو تحقق أمني أو رفض وصول في هذه المحاولة. "
