@@ -849,8 +849,8 @@ _PROVIDER_DENIAL_MARKERS = (
     "robot check",
 )
 _PROVIDER_RESTRICTION_MESSAGE = (
-    "المصدر أبلغ عن حظر أو تحقق أمني أو رفض وصول في هذه المحاولة. "
-    "تم تبديل البروكسي للمحاولة القادمة؛ جرّب إعادة المحاولة."
+    "رفض المصدر الطلب عبر أحد البروكسيات أو فرض تحققًا أمنيًا. "
+    "تم تدوير البروكسي وتجربة المتاح دون نجاح؛ جرّب لاحقًا."
 )
 
 
@@ -860,6 +860,10 @@ class _ProxyConnectionBroken(Exception):
 
 class _RetryableTikipError(Exception):
     """Raised for source failures that are safe to retry with another proxy."""
+
+
+class _ProviderRejectedTikipError(Exception):
+    """Raised when Tikip rejects a request so the caller can rotate proxies."""
 
 
 def _is_connection_failure(error_or_text) -> bool:
@@ -980,13 +984,13 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
                 )
             except Exception as exc:
                 if denied_statuses or await _page_shows_provider_restriction(page, denied_statuses):
-                    return _PROVIDER_RESTRICTION_MESSAGE
+                    raise _ProviderRejectedTikipError from exc
                 if _is_connection_failure(exc) or connection_failures:
                     raise _ProxyConnectionBroken from exc
                 raise
 
             if await _page_shows_provider_restriction(page, denied_statuses):
-                return _PROVIDER_RESTRICTION_MESSAGE
+                raise _ProviderRejectedTikipError
 
             _set_progress(progress, "البحث عن الحساب وجمع بياناته")
             try:
@@ -1016,13 +1020,13 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
                 )
             except Exception as exc:
                 if denied_statuses or await _page_shows_provider_restriction(page, denied_statuses):
-                    return _PROVIDER_RESTRICTION_MESSAGE
+                    raise _ProviderRejectedTikipError from exc
                 if _is_connection_failure(exc) or connection_failures:
                     raise _ProxyConnectionBroken from exc
                 raise
 
             if await _page_shows_provider_restriction(page, denied_statuses):
-                return _PROVIDER_RESTRICTION_MESSAGE
+                raise _ProviderRejectedTikipError
 
             if not isinstance(api_result, dict):
                 if connection_failures:
@@ -1037,7 +1041,7 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
 
             status = api_result.get("status")
             if status in {401, 403, 429}:
-                return _PROVIDER_RESTRICTION_MESSAGE
+                raise _ProviderRejectedTikipError
             if not isinstance(status, int) or status < 200 or status >= 300:
                 if connection_failures:
                     raise _ProxyConnectionBroken
@@ -1049,7 +1053,10 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
             if not isinstance(payload, dict):
                 raise _RetryableTikipError("invalid_json")
             if payload.get("status") == "error":
-                return str(payload.get("message") or payload.get("error") or "لم يعثر المصدر على بيانات عامة للحساب.")
+                error_message = str(payload.get("message") or payload.get("error") or "")
+                if any(marker in error_message.casefold() for marker in _PROVIDER_DENIAL_MARKERS):
+                    raise _ProviderRejectedTikipError
+                return error_message or "لم يعثر المصدر على بيانات عامة للحساب."
 
             _set_progress(progress, "وصلت البيانات؛ جارٍ تنسيق النتيجة")
             return format_tikip_api_result(username, payload)
@@ -1071,6 +1078,7 @@ async def fetch_data_from_tikip(username: str, progress=None):
 
     total_proxies = len(_PROXY_POOL)
     last_error = None
+    saw_provider_rejection = False
     used_proxies = set()
     for _ in range(total_proxies):
         proxy, proxy_index = await _get_next_proxy(used_proxies)
@@ -1089,6 +1097,10 @@ async def fetch_data_from_tikip(username: str, progress=None):
             # في حال فشل الاتصال بالبروكسي، تستمر الحلقة وتجرب البروكسي التالي تلقائياً
             print(f"Proxy slot #{proxy_index + 1} connection failed, rotating to next...", flush=True)
             continue
+        except _ProviderRejectedTikipError:
+            saw_provider_rejection = True
+            print(f"Proxy slot #{proxy_index + 1} was rejected by Tikip, rotating to next...", flush=True)
+            continue
         except (asyncio.TimeoutError, PlaywrightTimeoutError, _RetryableTikipError):
             last_error = "انتهت مهلة أو تعذر قراءة رد مصدر البيانات."
             print(f"Proxy slot #{proxy_index + 1} timed out, rotating to next...", flush=True)
@@ -1098,6 +1110,8 @@ async def fetch_data_from_tikip(username: str, progress=None):
             print(f"Proxy slot #{proxy_index + 1} failed ({type(exc).__name__}), rotating to next...", flush=True)
             continue
 
+    if saw_provider_rejection:
+        return _PROVIDER_RESTRICTION_MESSAGE
     if last_error:
         return f"{last_error} جُرّبت البروكسيات المتاحة، حاول مرة أخرى لاحقًا."
     return (

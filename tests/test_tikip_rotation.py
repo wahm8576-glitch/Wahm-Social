@@ -96,18 +96,34 @@ class TikipRotationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results, ["proxy-one", "proxy-two"])
         self.assertEqual({proxy_id for _, proxy_id in calls}, {"proxy-one", "proxy-two"})
 
-    async def test_provider_restriction_is_not_retried(self):
+    async def test_provider_restriction_rotates_to_next_proxy(self):
         calls = []
 
         async def fetch_once(_username, proxy, _progress=None):
             calls.append(proxy["id"])
-            return bot._PROVIDER_RESTRICTION_MESSAGE
+            if proxy["id"] == "proxy-one":
+                raise bot._ProviderRejectedTikipError()
+            return "ok"
+
+        with patch.object(bot, "_fetch_once_through_proxy", side_effect=fetch_once):
+            result = await bot.fetch_data_from_tikip("alice")
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(calls, ["proxy-one", "proxy-two"])
+
+    async def test_all_provider_rejections_try_each_proxy_once(self):
+        calls = []
+
+        async def fetch_once(_username, proxy, _progress=None):
+            calls.append(proxy["id"])
+            raise bot._ProviderRejectedTikipError()
 
         with patch.object(bot, "_fetch_once_through_proxy", side_effect=fetch_once):
             result = await bot.fetch_data_from_tikip("alice")
 
         self.assertEqual(result, bot._PROVIDER_RESTRICTION_MESSAGE)
-        self.assertEqual(calls, ["proxy-one"])
+        self.assertEqual(calls, ["proxy-one", "proxy-two", "proxy-three"])
+        self.assertEqual(len(calls), len(set(calls)))
 
 
 if __name__ == "__main__":
