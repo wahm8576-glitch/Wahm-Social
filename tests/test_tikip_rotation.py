@@ -22,6 +22,11 @@ class TikipRotationTests(unittest.IsolatedAsyncioTestCase):
         bot._ACTIVE_PROXY_INDEX = 0
         bot._PROXY_LOCK = asyncio.Lock()
         bot._BROWSER_SEMAPHORE = asyncio.Semaphore(1)
+        bot._SEEN_WEBHOOK_UPDATE_IDS.clear()
+
+    async def test_duplicate_webhook_update_is_claimed_only_once(self):
+        self.assertTrue(bot._claim_webhook_update(123456))
+        self.assertFalse(bot._claim_webhook_update(123456))
 
     async def test_attempt_timeout_rotates_without_waiting_for_background_timeout(self):
         calls = []

@@ -12,6 +12,7 @@ import secrets
 import shutil
 import time
 import urllib.request
+from collections import OrderedDict
 from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 import firebase_admin
 from firebase_admin import credentials as firebase_credentials, firestore
 from google.api_core.exceptions import AlreadyExists
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 import uvicorn
 
@@ -49,6 +50,8 @@ PROGRESS_ATTACHMENT_NAME = "loading_animation"
 _LOOKUP_CACHE = {}
 _LOOKUP_TASKS = {}
 _RETRY_IN_PROGRESS = set()
+_SEEN_WEBHOOK_UPDATE_IDS = OrderedDict()
+_WEBHOOK_UPDATE_ID_CACHE_LIMIT = 4096
 _BROWSER_SEMAPHORE = asyncio.Semaphore(1)
 
 FIELD_LABELS = {
@@ -1439,19 +1442,29 @@ async def _retry_active_lookup(chat_id, wait_msg, username: str, is_animation: b
         )
     except Exception:
         pass
-    for percent in (20, 40, 60, 80, 100):
-        if task.done():
+    started = time.monotonic()
+    while not task.done():
+        elapsed = time.monotonic() - started
+        remaining = MAX_LOOKUP_SECONDS - elapsed
+        if remaining <= 0:
             break
         try:
             await _edit_wait_message(
                 chat_id,
                 wait_msg,
                 is_animation,
-                _progress_message(username, percent, "🔄 جارٍ استرجاع النتيجة"),
+                _progress_message(
+                    username,
+                    min(100, int(elapsed / MAX_LOOKUP_SECONDS * 100)),
+                    "🔄 جارٍ استرجاع النتيجة",
+                ),
             )
         except Exception:
             pass
-        await asyncio.wait({task}, timeout=0.5)
+        await asyncio.wait(
+            {task},
+            timeout=min(PROGRESS_ANIMATION_INTERVAL, remaining),
+        )
     if task.done():
         try:
             result = task.result()
@@ -1616,18 +1629,39 @@ async def health_check():
     return {"ok": True, "service": "tikwahm", "mode": "webhook"}
 
 
+def _claim_webhook_update(update_id):
+    if update_id is None:
+        return True
+    if update_id in _SEEN_WEBHOOK_UPDATE_IDS:
+        return False
+    _SEEN_WEBHOOK_UPDATE_IDS[update_id] = time.monotonic()
+    while len(_SEEN_WEBHOOK_UPDATE_IDS) > _WEBHOOK_UPDATE_ID_CACHE_LIMIT:
+        _SEEN_WEBHOOK_UPDATE_IDS.popitem(last=False)
+    return True
+
+
+async def _process_webhook_update(update):
+    try:
+        await bot.process_new_updates([update])
+    except Exception as exc:
+        print(f"Telegram update processing failed ({type(exc).__name__}).", flush=True)
+
+
 @app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if not WEBHOOK_SECRET or not hmac.compare_digest(supplied_secret, WEBHOOK_SECRET):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
     try:
         update = types.Update.de_json(json.dumps(await request.json()))
-        await bot.process_new_updates([update])
+        update_id = getattr(update, "update_id", None)
     except Exception as exc:
-        print(f"Telegram update processing failed ({type(exc).__name__}).", flush=True)
-        raise HTTPException(status_code=500, detail="Update processing failed") from exc
+        print(f"Telegram update parsing failed ({type(exc).__name__}).", flush=True)
+        raise HTTPException(status_code=400, detail="Invalid update") from exc
+    if not _claim_webhook_update(update_id):
+        return {"ok": True}
+    background_tasks.add_task(_process_webhook_update, update)
     return {"ok": True}
 
 
