@@ -12,6 +12,7 @@ import shutil
 import time
 from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -30,6 +31,7 @@ WEBHOOK_SECRET = ""
 WEBHOOK_SECRET_SEED = os.environ.get("WEBHOOK_SECRET", "").strip()
 WEBHOOK_PATH = "/telegram/webhook"
 TIKIP_URL = "https://tikip.us/"
+TIKIP_API_URL = "https://shinyfrydgdghfdgdgmouse-a6de.issam1996kech.workers.dev/api/v1/profile"
 MAX_LOOKUP_SECONDS = 15
 EXPECTED_LOOKUP_SECONDS = 10
 CACHE_TTL_SECONDS = 10 * 60
@@ -284,6 +286,117 @@ def format_tikip_result(username: str, raw_text: str) -> str:
     return result
 
 
+def _format_source_timestamp(value) -> str:
+    if value in (None, "", 0, "0", False, "Never", "N/A"):
+        return "Never"
+    try:
+        timestamp = float(value)
+        if timestamp > 0:
+            if timestamp >= 1e12:
+                timestamp /= 1000
+            return datetime.fromtimestamp(timestamp, timezone.utc).strftime(
+                "%-m/%-d/%Y, %-I:%M:%S %p"
+            )
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+    return str(value)
+
+
+def _format_tikip_metric(value) -> str:
+    if value is None:
+        return "Unavailable"
+    try:
+        number = int(value)
+        if str(number) == str(value).strip() or isinstance(value, int):
+            return f"{number:,}"
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def format_tikip_api_result(username: str, payload: dict):
+    """Format Tikip's public JSON response into the existing Arabic profile card."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return f"لم تظهر بيانات واضحة للحساب @{username}. جرّب مرة أخرى لاحقًا."
+
+    user = data.get("user") if isinstance(data.get("user"), dict) else {}
+    stats = data.get("stats") if isinstance(data.get("stats"), dict) else {}
+    profile_username = str(user.get("uniqueId") or username).lstrip("@")
+    nickname = str(user.get("nickname") or f"@{profile_username}")
+    lines = [nickname, f"@{profile_username}"]
+    bio = str(user.get("signature") or "").strip()
+    if bio:
+        lines.append(bio)
+
+    region = (
+        data.get("current_region_name")
+        or user.get("current_region_name")
+        or data.get("current_region")
+        or "Unavailable"
+    )
+    if isinstance(region, str) and len(region.strip()) == 2:
+        region = "Unavailable"
+    lines.extend([
+        "ESTIMATED CURRENT REGION", str(region),
+        "JOINED", _format_source_timestamp(user.get("createTime")),
+        "LANGUAGE", str(user.get("language") or "Unavailable"),
+        "USER ID", str(user.get("id") or "Unavailable"),
+        "NICKNAME UPDATED",
+        _format_source_timestamp(
+            user.get("nickNameModifyTime")
+            or data.get("nick_name_modify_time")
+            or data.get("nickname_modify_time")
+        ),
+        "USERNAME UPDATED",
+        _format_source_timestamp(
+            user.get("uniqueIdModifyTime")
+            or data.get("unique_id_modify_time")
+            or data.get("username_modify_time")
+        ),
+    ])
+
+    followers = stats.get("followerCount")
+    hearts = stats.get("heartCount")
+    videos = stats.get("videoCount")
+    following = stats.get("followingCount")
+    friends = stats.get("friendCount")
+    lines.extend([
+        "FOLLOWERS", _format_tikip_metric(followers),
+        "HEARTS", _format_tikip_metric(hearts),
+        "VIDEOS", _format_tikip_metric(videos),
+        "FOLLOWING", _format_tikip_metric(following),
+        "FRIENDS", _format_tikip_metric(friends),
+    ])
+
+    try:
+        follower_count = float(followers or 0)
+        heart_count = float(hearts or 0)
+        video_count = float(videos or 0)
+        hearts_per_follower = heart_count / follower_count if follower_count else 0
+        engagement = (
+            heart_count / video_count / follower_count * 100
+            if video_count and follower_count else 0
+        )
+        lines.extend([
+            "HEARTS PER FOLLOWER", f"{hearts_per_follower:.2f}",
+            "EST. ENGAGEMENT", f"{engagement:.2f}%",
+        ])
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+
+    plain_text = format_tikip_result(username, "\n".join(lines))
+    avatar_url = str(user.get("avatarLarger") or user.get("avatarMedium") or "")
+    parsed_avatar = urlparse(avatar_url)
+    if parsed_avatar.scheme != "https" or not parsed_avatar.hostname:
+        avatar_url = ""
+    return {
+        "text": plain_text,
+        "markdown": format_tikip_rich_markdown(username, plain_text, avatar_url),
+        "avatar_url": avatar_url,
+    }
+
+
 def _escape_markdown(value: str) -> str:
     value = str(value).replace("\n", " ").replace("\r", " ")
     return re.sub(r"([\\`*_{}\[\]()#+\-.!|>~])", r"\\\1", value)
@@ -526,13 +639,18 @@ async def _page_shows_provider_restriction(page, denied_statuses) -> bool:
 async def _fetch_once_through_proxy(username: str, proxy, progress=None):
     """Perform one lookup through one proxy."""
     browser = None
-    source_host = (urlparse(TIKIP_URL).hostname or "").casefold()
+    source_hosts = {
+        (urlparse(TIKIP_URL).hostname or "").casefold(),
+        (urlparse(TIKIP_API_URL).hostname or "").casefold(),
+    }
     denied_statuses = []
     connection_failures = []
     try:
         _set_progress(progress, "تهيئة البحث")
         async with async_playwright() as p:
-            options = {"headless": True, "proxy": _proxy_launch_config(proxy)}
+            options = {"headless": True}
+            if proxy:
+                options["proxy"] = _proxy_launch_config(proxy)
             executable = (
                 os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
                 or shutil.which("chromium")
@@ -551,7 +669,7 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
             def record_response(response):
                 try:
                     response_host = (urlparse(response.url).hostname or "").casefold()
-                    if response_host == source_host and response.status in {401, 403, 429}:
+                    if response_host in source_hosts and response.status in {401, 403, 429}:
                         denied_statuses.append(response.status)
                 except Exception:
                     pass
@@ -560,7 +678,7 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
                 try:
                     request_host = (urlparse(request.url).hostname or "").casefold()
                     relevant_type = request.resource_type in {"document", "xhr", "fetch"}
-                    if (request_host == source_host and relevant_type
+                    if (request_host in source_hosts and relevant_type
                             and _is_connection_failure(request.failure or "")):
                         connection_failures.append(True)
                 except Exception:
@@ -585,61 +703,69 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
             if await _page_shows_provider_restriction(page, denied_statuses):
                 return _PROVIDER_RESTRICTION_MESSAGE
 
-            search_box = page.locator("#username-input")
+            _set_progress(progress, "البحث عن الحساب وجمع بياناته")
             try:
-                await search_box.wait_for(state="visible", timeout=SOURCE_TIMEOUT_MILLISECONDS)
-                await search_box.fill(username)
-                await page.locator("#search-button").click(timeout=SOURCE_TIMEOUT_MILLISECONDS)
+                api_result = await page.evaluate(
+                    """async ({endpoint, username, timeoutMs}) => {
+                        const controller = new AbortController();
+                        const timer = setTimeout(() => controller.abort(), timeoutMs);
+                        try {
+                            const response = await fetch(
+                                endpoint + '?username=' + encodeURIComponent(username),
+                                { signal: controller.signal, cache: 'no-store' }
+                            );
+                            let body = null;
+                            try { body = await response.json(); } catch (_) {}
+                            return { status: response.status, body };
+                        } catch (error) {
+                            return { error: error && error.message ? error.message : 'NetworkError' };
+                        } finally {
+                            clearTimeout(timer);
+                        }
+                    }""",
+                    {
+                        "endpoint": TIKIP_API_URL,
+                        "username": username,
+                        "timeoutMs": SOURCE_TIMEOUT_MILLISECONDS,
+                    },
+                )
             except Exception as exc:
                 if denied_statuses or await _page_shows_provider_restriction(page, denied_statuses):
                     return _PROVIDER_RESTRICTION_MESSAGE
                 if _is_connection_failure(exc) or connection_failures:
                     raise _ProxyConnectionBroken from exc
                 raise
-            _set_progress(progress, "البحث عن الحساب وجمع بياناته")
-
-            try:
-                await page.wait_for_function(
-                    """() => {
-                        const visible = (el) => el && !el.classList.contains('hidden')
-                            && getComputedStyle(el).display !== 'none';
-                        return visible(document.querySelector('#results-card'))
-                            || visible(document.querySelector('#message-area'));
-                    }""",
-                    timeout=SOURCE_TIMEOUT_MILLISECONDS,
-                )
-            except PlaywrightTimeoutError:
-                if await _page_shows_provider_restriction(page, denied_statuses):
-                    return _PROVIDER_RESTRICTION_MESSAGE
-                if connection_failures:
-                    raise _ProxyConnectionBroken
-                return (
-                    f"انتهت مهلة البحث ولم يعرض الموقع نتيجة خلال "
-                    f"{_arabic_digits(MAX_LOOKUP_SECONDS)} ثوانٍ. "
-                    "جرّب مرة أخرى لاحقًا أو تحقق من أن الموقع متاح."
-                )
 
             if await _page_shows_provider_restriction(page, denied_statuses):
                 return _PROVIDER_RESTRICTION_MESSAGE
 
-            _set_progress(progress, "وصلت البيانات؛ جارٍ تنسيق النتيجة")
-            result_card = page.locator("#results-card")
-            if not await result_card.is_visible():
-                text = (await page.locator("#message-area").inner_text()).strip()
-                if not text and connection_failures:
+            if not isinstance(api_result, dict):
+                if connection_failures:
                     raise _ProxyConnectionBroken
-                return text or "لم يعرض الموقع نتيجة واضحة. جرّب اسم مستخدم آخر."
+                return "تعذر قراءة رد مصدر البيانات. جرّب مرة أخرى لاحقًا."
+            if api_result.get("error"):
+                if connection_failures:
+                    raise _ProxyConnectionBroken
+                if "abort" in str(api_result["error"]).casefold():
+                    return "انتهت مهلة مصدر البيانات. جرّب إعادة المحاولة لاحقًا."
+                return "تعذر الاتصال بمصدر البيانات. جرّب إعادة المحاولة لاحقًا."
 
-            text = (await result_card.inner_text()).strip()
-            if not text:
-                return "ظهر رد من الموقع لكنه لم يتضمن نصًا واضحًا. جرّب اسم مستخدم آخر."
-            plain_text = format_tikip_result(username, text)
-            avatar_url = await page.locator("#avatar").get_attribute("src")
-            parsed_avatar = urlparse(avatar_url or "")
-            if parsed_avatar.scheme != "https" or not parsed_avatar.hostname:
-                avatar_url = ""
-            rich_markdown = format_tikip_rich_markdown(username, plain_text, avatar_url or "")
-            return {"text": plain_text, "markdown": rich_markdown, "avatar_url": avatar_url or ""}
+            status = api_result.get("status")
+            if status in {401, 403, 429}:
+                return _PROVIDER_RESTRICTION_MESSAGE
+            if not isinstance(status, int) or status < 200 or status >= 300:
+                if connection_failures:
+                    raise _ProxyConnectionBroken
+                return f"رفض مصدر البيانات الطلب (HTTP {status}). جرّب لاحقًا."
+
+            payload = api_result.get("body")
+            if not isinstance(payload, dict):
+                return "أعاد مصدر البيانات ردًا غير مفهوم. جرّب مرة أخرى لاحقًا."
+            if payload.get("status") == "error":
+                return str(payload.get("message") or payload.get("error") or "لم يعثر المصدر على بيانات عامة للحساب.")
+
+            _set_progress(progress, "وصلت البيانات؛ جارٍ تنسيق النتيجة")
+            return format_tikip_api_result(username, payload)
     finally:
         if browser is not None:
             try:
