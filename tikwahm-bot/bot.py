@@ -388,27 +388,32 @@ def _load_proxy_pool(path: str):
     """Read Webshare entries in host:port:username:password format."""
     proxies = []
     try:
-        with open(path, "r", encoding="utf-8") as proxy_file:
-            for raw_line in proxy_file:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split(":", 3)
-                if len(parts) != 4:
-                    continue
-                host, port, username, password = parts
-                if not host or not port.isdigit() or not username or not password:
-                    continue
-                port_number = int(port)
-                if not 1 <= port_number <= 65535:
-                    continue
-                proxies.append({
-                    "host": host,
-                    "port": port_number,
-                    "username": username,
-                    "password": password,
-                })
-    except OSError:
+        encoded = os.environ.get("TIKWAHM_PROXY_LIST_B64", "").strip()
+        if encoded:
+            content = base64.b64decode(encoded, validate=True).decode("utf-8")
+        else:
+            with open(path, "r", encoding="utf-8") as proxy_file:
+                content = proxy_file.read()
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(":", 3)
+            if len(parts) != 4:
+                continue
+            host, port, username, password = parts
+            if not host or not port.isdigit() or not username or not password:
+                continue
+            port_number = int(port)
+            if not 1 <= port_number <= 65535:
+                continue
+            proxies.append({
+                "host": host,
+                "port": port_number,
+                "username": username,
+                "password": password,
+            })
+    except (OSError, ValueError, UnicodeError):
         return []
     return proxies
 
