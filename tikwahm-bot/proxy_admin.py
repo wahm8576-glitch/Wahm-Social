@@ -76,7 +76,7 @@ PAGE = r'''<!doctype html>
         <div><h2>إدارة البروكسيات</h2><p>تحكم بالقائمة النشطة، اختبر الاتصال، واحتفظ بنسخة من الإعدادات.</p></div>
         <div class="buttons"><button class="btn" id="copyRender">نسخ إعداد Render</button><button class="btn" id="testAll">اختبار الكل</button><button class="btn primary" id="addProxy">＋ إضافة بروكسي</button></div>
       </div>
-      <div class="alert"><b>تنبيه التخزين:</b> التعديلات تعمل فورًا على البوت، لكن مساحة الخدمة الحالية مؤقتة عند إعادة النشر. بعد التعديل، اضغط «نسخ إعداد Render» واحفظ القيمة في متغير <code dir="ltr">TIKWAHM_PROXY_LIST_B64</code> لضمان بقائها بعد إعادة النشر. لا تشارك القيمة؛ فهي تتضمن بيانات الدخول.</div>
+      <div class="alert" id="storageAlert"><b>تنبيه التخزين:</b> التعديلات تعمل فورًا على البوت، لكن مساحة الخدمة الحالية مؤقتة عند إعادة النشر. بعد التعديل، اضغط «نسخ إعداد Render» واحفظ القيمة في متغير <code dir="ltr">TIKWAHM_PROXY_LIST_B64</code> لضمان بقائها بعد إعادة النشر. لا تشارك القيمة؛ فهي تتضمن بيانات الدخول.</div>
       <div class="cards">
         <div class="metric"><div class="metric-label">إجمالي البروكسيات</div><div class="metric-value" id="totalCount">—</div><div class="metric-note">المحفوظة في اللوحة</div></div>
         <div class="metric"><div class="metric-label">النشطة</div><div class="metric-value" id="activeCount">—</div><div class="metric-note">يدوّر بينها البوت تلقائيًا</div></div>
@@ -105,7 +105,12 @@ PAGE = r'''<!doctype html>
     if(response.status===401){showLogin();throw new Error('انتهت الجلسة؛ سجّل الدخول مجددًا.')}
     const type=response.headers.get('content-type')||'';
     const data=type.includes('application/json')?await response.json():await response.text();
-    if(!response.ok){const detail=(data&&data.detail)||'تعذر إكمال العملية.';throw new Error(detail)}
+    if(!response.ok){
+      const error=new Error((data&&data.detail)||'تعذر إكمال العملية.');
+      error.status=response.status;
+      if(response.status===409){try{await refresh()}catch{}}
+      throw error
+    }
     return data;
   }
   function showLogin(){ $('dashboard').classList.add('hidden');$('loginScreen').classList.remove('hidden');setTimeout(()=>$('loginPassword').focus(),50) }
@@ -139,7 +144,7 @@ PAGE = r'''<!doctype html>
     $('updatedAt').textContent=`آخر تحديث: ${new Intl.DateTimeFormat('ar-SA',{dateStyle:'medium',timeStyle:'short'}).format(new Date())}`;
   }
   function button(text,cls){const b=document.createElement('button');b.type='button';b.className=cls;b.textContent=text;return b}
-  async function refresh(){const data=await api('/proxies');proxies=data.proxies||[];tests=data.tests||{};showDashboard();render()}
+  async function refresh(){const data=await api('/proxies');proxies=data.proxies||[];tests=data.tests||{};const usingFirestore=data.storage==='firestore';$('storageAlert').innerHTML=usingFirestore?'<b>تخزين Firebase متصل:</b> تُحفظ التعديلات تلقائيًا في Cloud Firestore قبل تطبيقها على البوت؛ لا حاجة لنسخ إعداد Render.':'<b>تنبيه التخزين:</b> التعديلات تعمل فورًا على البوت، لكن مساحة الخدمة الحالية مؤقتة عند إعادة النشر. بعد التعديل، اضغط «نسخ إعداد Render» واحفظ القيمة في متغير <code dir="ltr">TIKWAHM_PROXY_LIST_B64</code> لضمان بقائها بعد إعادة النشر. لا تشارك القيمة؛ فهي تتضمن بيانات الدخول.';$('copyRender').classList.toggle('hidden',usingFirestore);showDashboard();render()}
   function openModal(title,description,content,onSave,saveText='حفظ'){
     const root=$('modalRoot');root.replaceChildren();const back=document.createElement('div');back.className='modal-backdrop';
     const box=document.createElement('section');box.className='modal';box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');
@@ -297,6 +302,7 @@ def build_proxy_admin_router(
     test_proxy: Callable[[dict], object],
     password_hash: str = DEFAULT_PASSWORD_HASH,
     password_pepper: Callable[[], str] = lambda: "",
+    storage_backend: Callable[[], str] = lambda: "file",
 ) -> APIRouter:
     router = APIRouter()
     tests: dict[str, dict] = {}
@@ -379,6 +385,7 @@ def build_proxy_admin_router(
         return {
             "proxies": [_public_proxy(entry) for entry in entries],
             "tests": tests,
+            "storage": storage_backend(),
             "counts": {
                 "total": len(entries),
                 "active": sum(bool(entry.get("enabled", True)) for entry in entries),

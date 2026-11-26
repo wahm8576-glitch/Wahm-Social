@@ -16,6 +16,9 @@ from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+import firebase_admin
+from firebase_admin import credentials as firebase_credentials, firestore
+from google.api_core.exceptions import AlreadyExists
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 import uvicorn
@@ -37,7 +40,8 @@ TIKIP_API_URL = "https://shinyfrydgdghfdgdgmouse-a6de.issam1996kech.workers.dev/
 MAX_LOOKUP_SECONDS = 15
 EXPECTED_LOOKUP_SECONDS = 10
 CACHE_TTL_SECONDS = 10 * 60
-SOURCE_TIMEOUT_MILLISECONDS = CACHE_TTL_SECONDS * 1_000
+SOURCE_ATTEMPT_TIMEOUT_SECONDS = 15
+SOURCE_TIMEOUT_MILLISECONDS = SOURCE_ATTEMPT_TIMEOUT_SECONDS * 1_000
 PROGRESS_ANIMATION_INTERVAL = 1.0
 LOADING_GIF_PATH = os.path.join(os.path.dirname(__file__), "tikwahm_loading.gif")
 PROGRESS_MEDIA_ID = "tikwahm_loading"
@@ -538,6 +542,28 @@ PROXY_DASHBOARD_FILE = os.environ.get(
     os.path.join(os.path.dirname(__file__), "proxy_dashboard.json"),
 ).strip()
 
+FIREBASE_SERVICE_ACCOUNT_JSON = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+_FIRESTORE_PROXY_DOCUMENT = None
+_FIRESTORE_CLIENT = None
+_FIRESTORE_PROXY_VERSION = 0
+if FIREBASE_SERVICE_ACCOUNT_JSON:
+    try:
+        _firebase_service_account = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        _firebase_project_id = _firebase_service_account.get("project_id")
+        if not isinstance(_firebase_service_account, dict) or not _firebase_project_id:
+            raise ValueError("missing project_id")
+        _firebase_app = firebase_admin.initialize_app(
+            firebase_credentials.Certificate(_firebase_service_account),
+            {"projectId": _firebase_project_id},
+            name="tikwahm_proxy_dashboard",
+        )
+        _FIRESTORE_CLIENT = firestore.client(app=_firebase_app)
+        _FIRESTORE_PROXY_DOCUMENT = _FIRESTORE_CLIENT.collection("private_config").document("proxy_dashboard")
+    except Exception:
+        raise RuntimeError(
+            "تعذر تهيئة Firebase. تحقق من قيمة FIREBASE_SERVICE_ACCOUNT_JSON وصلاحية حساب الخدمة."
+        ) from None
+
 
 def _parse_proxy_source_line(raw_line: str):
     line = raw_line.strip()
@@ -588,35 +614,48 @@ def _load_proxy_admin_entries(path: str):
     return entries
 
 
+def _normalize_proxy_dashboard_entries(entries):
+    if not isinstance(entries, list):
+        return None
+    loaded = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return None
+        parsed = _parse_proxy_source_line(
+            f"{entry.get('host', '')}:{entry.get('port', '')}:"
+            f"{entry.get('username', '')}:{entry.get('password', '')}"
+        )
+        if parsed is None:
+            return None
+        proxy_id = str(entry.get("id", ""))
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", proxy_id):
+            proxy_id = secrets.token_urlsafe(12)
+        parsed["id"] = proxy_id
+        parsed["enabled"] = bool(entry.get("enabled", True))
+        loaded.append(parsed)
+    return loaded
+
+
 def _load_proxy_dashboard_state():
     try:
         with open(PROXY_DASHBOARD_FILE, "r", encoding="utf-8") as state_file:
             payload = json.load(state_file)
         entries = payload.get("proxies") if isinstance(payload, dict) else None
-        if not isinstance(entries, list):
-            return None
-        loaded = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                return None
-            parsed = _parse_proxy_source_line(
-                f"{entry.get('host', '')}:{entry.get('port', '')}:"
-                f"{entry.get('username', '')}:{entry.get('password', '')}"
-            )
-            if parsed is None:
-                return None
-            proxy_id = str(entry.get("id", ""))
-            if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", proxy_id):
-                proxy_id = secrets.token_urlsafe(12)
-            parsed["id"] = proxy_id
-            parsed["enabled"] = bool(entry.get("enabled", True))
-            loaded.append(parsed)
-        return loaded
+        return _normalize_proxy_dashboard_entries(entries)
     except (OSError, ValueError, UnicodeError, TypeError):
         return None
 
 
-_PROXY_ADMIN_ENTRIES = _load_proxy_dashboard_state()
+def _proxy_payload_version(payload):
+    version = payload.get("version") if isinstance(payload, dict) else None
+    return version if isinstance(version, int) and not isinstance(version, bool) and version >= 1 else 1
+
+
+_PROXY_ADMIN_ENTRIES = (
+    _load_proxy_admin_entries(PROXY_LIST_PATH)
+    if _FIRESTORE_PROXY_DOCUMENT is not None and os.environ.get("TIKWAHM_PROXY_LIST_B64", "").strip()
+    else _load_proxy_dashboard_state()
+)
 if _PROXY_ADMIN_ENTRIES is None:
     _PROXY_ADMIN_ENTRIES = _load_proxy_admin_entries(PROXY_LIST_PATH)
 _PROXY_POOL = [dict(proxy) for proxy in _PROXY_ADMIN_ENTRIES if proxy.get("enabled", True)]
@@ -625,26 +664,68 @@ _PROXY_LOCK = asyncio.Lock()
 
 
 async def _save_proxy_admin_entries(entries):
-    """Atomically store the credential-bearing pool in a private runtime file and refresh the live pool."""
-    global _PROXY_ADMIN_ENTRIES, _PROXY_POOL, _ACTIVE_PROXY_INDEX
-    parent = os.path.dirname(PROXY_DASHBOARD_FILE) or "."
-    os.makedirs(parent, exist_ok=True)
-    temp_path = f"{PROXY_DASHBOARD_FILE}.{secrets.token_hex(8)}.tmp"
-    payload = {"version": 1, "saved_at": int(time.time()), "proxies": entries}
-    try:
-        descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
-            json.dump(payload, state_file, ensure_ascii=False, separators=(",", ":"))
-            state_file.flush()
-            os.fsync(state_file.fileno())
-        os.replace(temp_path, PROXY_DASHBOARD_FILE)
-        os.chmod(PROXY_DASHBOARD_FILE, 0o600)
-    finally:
+    """Persist credentials remotely when configured, then refresh the live pool."""
+    global _PROXY_ADMIN_ENTRIES, _PROXY_POOL, _ACTIVE_PROXY_INDEX, _FIRESTORE_PROXY_VERSION
+    payload = {"version": _FIRESTORE_PROXY_VERSION or 1, "saved_at": int(time.time()), "proxies": entries}
+    if _FIRESTORE_PROXY_DOCUMENT is not None:
+        expected_version = _FIRESTORE_PROXY_VERSION
+        next_payload = {**payload, "version": expected_version + 1}
+        serialized_size = len(json.dumps(next_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if serialized_size > 900_000:
+            raise HTTPException(status_code=413, detail="قائمة البروكسيات أكبر من الحد الآمن لوثيقة Firestore.")
+        def commit_if_current():
+            transaction = _FIRESTORE_CLIENT.transaction()
+
+            @firestore.transactional
+            def update(tx):
+                snapshots = list(tx.get_all([_FIRESTORE_PROXY_DOCUMENT]))
+                snapshot = snapshots[0] if snapshots else None
+                current_version = _proxy_payload_version(snapshot.to_dict() if snapshot.exists else None)
+                if not snapshot.exists or current_version != expected_version:
+                    raise RuntimeError("proxy_dashboard_conflict")
+                tx.set(_FIRESTORE_PROXY_DOCUMENT, next_payload)
+                return current_version + 1
+
+            return update(transaction)
+
         try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except OSError:
-            pass
+            _FIRESTORE_PROXY_VERSION = await asyncio.to_thread(commit_if_current)
+        except RuntimeError as exc:
+            if str(exc) == "proxy_dashboard_conflict":
+                # Reject the stale write, but first replace the in-process pool
+                # with the winning remote version so subsequent reads are fresh.
+                latest_snapshot = await asyncio.to_thread(_FIRESTORE_PROXY_DOCUMENT.get)
+                if not latest_snapshot.exists:
+                    raise HTTPException(status_code=503, detail="تعذر استعادة إعدادات البروكسيات بعد التعارض.") from None
+                latest_payload = latest_snapshot.to_dict() or {}
+                latest_entries = _normalize_proxy_dashboard_entries(latest_payload.get("proxies"))
+                if latest_entries is None:
+                    raise HTTPException(status_code=503, detail="وثيقة البروكسيات البعيدة غير صالحة بعد التعارض.") from None
+                async with _PROXY_LOCK:
+                    _PROXY_ADMIN_ENTRIES = [dict(proxy) for proxy in latest_entries]
+                    _PROXY_POOL = [dict(proxy) for proxy in latest_entries if proxy.get("enabled", True)]
+                    _ACTIVE_PROXY_INDEX = 0
+                    _FIRESTORE_PROXY_VERSION = _proxy_payload_version(latest_payload)
+                raise HTTPException(status_code=409, detail="تعارض: تغيّر إعداد البروكسيات في نسخة أخرى. أعد تحميل الصفحة قبل الحفظ.") from None
+            raise
+    else:
+        parent = os.path.dirname(PROXY_DASHBOARD_FILE) or "."
+        os.makedirs(parent, exist_ok=True)
+        temp_path = f"{PROXY_DASHBOARD_FILE}.{secrets.token_hex(8)}.tmp"
+        try:
+            descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as state_file:
+                json.dump(payload, state_file, ensure_ascii=False, separators=(",", ":"))
+                state_file.flush()
+                os.fsync(state_file.fileno())
+            os.replace(temp_path, PROXY_DASHBOARD_FILE)
+            os.chmod(PROXY_DASHBOARD_FILE, 0o600)
+        finally:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except OSError:
+                pass
 
     source_lines = []
     for proxy in entries:
@@ -656,6 +737,46 @@ async def _save_proxy_admin_entries(entries):
         _PROXY_POOL = [dict(proxy) for proxy in entries if proxy.get("enabled", True)]
         _ACTIVE_PROXY_INDEX = 0
         os.environ["TIKWAHM_PROXY_LIST_B64"] = encoded
+
+
+async def _initialize_proxy_storage():
+    """Load Firestore state or migrate the existing file/environment list once."""
+    global _PROXY_ADMIN_ENTRIES, _PROXY_POOL, _ACTIVE_PROXY_INDEX, _FIRESTORE_PROXY_VERSION
+    if _FIRESTORE_PROXY_DOCUMENT is None:
+        return
+
+    snapshot = await asyncio.to_thread(_FIRESTORE_PROXY_DOCUMENT.get)
+    if snapshot.exists:
+        payload = snapshot.to_dict() or {}
+        entries = _normalize_proxy_dashboard_entries(payload.get("proxies"))
+        if entries is None:
+            raise RuntimeError("وثيقة البروكسيات في Firestore غير صالحة؛ أوقف التشغيل لتجنب فقد البيانات.")
+        remote_version = _proxy_payload_version(payload)
+    else:
+        entries = _PROXY_ADMIN_ENTRIES
+        payload = {"version": 1, "saved_at": int(time.time()), "proxies": entries}
+        serialized_size = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if serialized_size > 900_000:
+            raise RuntimeError("قائمة البروكسيات أكبر من الحد الآمن لوثيقة Firestore.")
+        try:
+            await asyncio.to_thread(_FIRESTORE_PROXY_DOCUMENT.create, payload)
+        except AlreadyExists:
+            snapshot = await asyncio.to_thread(_FIRESTORE_PROXY_DOCUMENT.get)
+            if not snapshot.exists:
+                raise RuntimeError("تعذر قراءة وثيقة البروكسيات بعد تعارض الترحيل.")
+            payload = snapshot.to_dict() or {}
+            entries = _normalize_proxy_dashboard_entries(payload.get("proxies"))
+            if entries is None:
+                raise RuntimeError("وثيقة البروكسيات في Firestore غير صالحة؛ أوقف التشغيل لتجنب فقد البيانات.")
+            remote_version = _proxy_payload_version(payload)
+        else:
+            remote_version = 1
+
+    async with _PROXY_LOCK:
+        _PROXY_ADMIN_ENTRIES = [dict(proxy) for proxy in entries]
+        _PROXY_POOL = [dict(proxy) for proxy in entries if proxy.get("enabled", True)]
+        _ACTIVE_PROXY_INDEX = 0
+        _FIRESTORE_PROXY_VERSION = remote_version
 
 
 async def _test_proxy_connection(proxy):
@@ -737,6 +858,10 @@ class _ProxyConnectionBroken(Exception):
     """Raised only for an explicit transport/proxy connection failure."""
 
 
+class _RetryableTikipError(Exception):
+    """Raised for source failures that are safe to retry with another proxy."""
+
+
 def _is_connection_failure(error_or_text) -> bool:
     text = str(error_or_text or "").casefold()
     return any(marker in text for marker in _CONNECTION_FAILURE_MARKERS)
@@ -750,16 +875,30 @@ def _proxy_launch_config(proxy):
     }
 
 
-async def _get_next_proxy():
-    """سحب البروكسي الحالي وتقديم المؤشر للبروكسي التالي تلقائياً لكل محاولة."""
+def _proxy_key(proxy):
+    return (
+        proxy.get("id") or proxy.get("host"),
+        proxy.get("port"),
+        proxy.get("username"),
+    )
+
+
+async def _get_next_proxy(excluded=None):
+    """سحب بروكسي غير مستخدم في البحث مع تدوير ذري للمؤشر."""
     global _ACTIVE_PROXY_INDEX
+    excluded = excluded or set()
     async with _PROXY_LOCK:
         total = len(_PROXY_POOL)
         if total == 0:
             return None, -1
-        current_index = _ACTIVE_PROXY_INDEX % total
-        _ACTIVE_PROXY_INDEX = (current_index + 1) % total
-        return _PROXY_POOL[current_index], current_index
+        for offset in range(total):
+            current_index = (_ACTIVE_PROXY_INDEX + offset) % total
+            proxy = _PROXY_POOL[current_index]
+            if _proxy_key(proxy) in excluded:
+                continue
+            _ACTIVE_PROXY_INDEX = (current_index + 1) % total
+            return proxy, current_index
+        return None, -1
 
 
 async def _page_shows_provider_restriction(page, denied_statuses) -> bool:
@@ -888,13 +1027,13 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
             if not isinstance(api_result, dict):
                 if connection_failures:
                     raise _ProxyConnectionBroken
-                return "تعذر قراءة رد مصدر البيانات. جرّب مرة أخرى لاحقًا."
+                raise _RetryableTikipError("invalid_browser_response")
             if api_result.get("error"):
                 if connection_failures:
                     raise _ProxyConnectionBroken
                 if "abort" in str(api_result["error"]).casefold():
-                    return "انتهت مهلة مصدر البيانات. جرّب إعادة المحاولة لاحقًا."
-                return "تعذر الاتصال بمصدر البيانات. جرّب إعادة المحاولة لاحقًا."
+                    raise _RetryableTikipError("source_timeout")
+                raise _ProxyConnectionBroken
 
             status = api_result.get("status")
             if status in {401, 403, 429}:
@@ -902,11 +1041,13 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
             if not isinstance(status, int) or status < 200 or status >= 300:
                 if connection_failures:
                     raise _ProxyConnectionBroken
+                if isinstance(status, int) and status >= 500:
+                    raise _RetryableTikipError(f"source_http_{status}")
                 return f"رفض مصدر البيانات الطلب (HTTP {status}). جرّب لاحقًا."
 
             payload = api_result.get("body")
             if not isinstance(payload, dict):
-                return "أعاد مصدر البيانات ردًا غير مفهوم. جرّب مرة أخرى لاحقًا."
+                raise _RetryableTikipError("invalid_json")
             if payload.get("status") == "error":
                 return str(payload.get("message") or payload.get("error") or "لم يعثر المصدر على بيانات عامة للحساب.")
 
@@ -921,7 +1062,7 @@ async def _fetch_once_through_proxy(username: str, proxy, progress=None):
 
 
 async def fetch_data_from_tikip(username: str, progress=None):
-    """يتم تغيير البروكسي تلقائياً مع كل محاولة بحث جديدة، وعند فشل الاتصال يتم الانتقال للتالي فوراً."""
+    """نفّذ دورة بحث محدودة، مع حجز بروكسي مختلف لكل محاولة فاشلة أو مكتملة."""
     if not _PROXY_POOL:
         return (
             "لا يمكن إجراء البحث: ملف إعداد البروكسي غير متاح أو لا يحتوي إدخالات صالحة. "
@@ -929,27 +1070,36 @@ async def fetch_data_from_tikip(username: str, progress=None):
         )
 
     total_proxies = len(_PROXY_POOL)
+    last_error = None
+    used_proxies = set()
     for _ in range(total_proxies):
-        proxy, proxy_index = await _get_next_proxy()
+        proxy, proxy_index = await _get_next_proxy(used_proxies)
         if proxy is None:
             break
+        used_proxies.add(_proxy_key(proxy))
         print(f"Using proxy slot #{proxy_index + 1}/{total_proxies} for @{username}", flush=True)
         try:
             async with _BROWSER_SEMAPHORE:
-                result = await _fetch_once_through_proxy(username, proxy, progress)
+                result = await asyncio.wait_for(
+                    _fetch_once_through_proxy(username, proxy, progress),
+                    timeout=SOURCE_ATTEMPT_TIMEOUT_SECONDS,
+                )
             return result
         except _ProxyConnectionBroken:
             # في حال فشل الاتصال بالبروكسي، تستمر الحلقة وتجرب البروكسي التالي تلقائياً
             print(f"Proxy slot #{proxy_index + 1} connection failed, rotating to next...", flush=True)
             continue
-        except PlaywrightTimeoutError:
-            return "انتهت مهلة تحميل صفحة البحث. تم تبديل البروكسي، حاول مرة أخرى."
+        except (asyncio.TimeoutError, PlaywrightTimeoutError, _RetryableTikipError):
+            last_error = "انتهت مهلة أو تعذر قراءة رد مصدر البيانات."
+            print(f"Proxy slot #{proxy_index + 1} timed out, rotating to next...", flush=True)
+            continue
         except Exception as exc:
-            return (
-                "تعذر إكمال البحث بسبب مشكلة في المتصفح أو الموقع "
-                f"({type(exc).__name__}). تم تبديل البروكسي، حاول مرة أخرى."
-            )
+            last_error = f"تعذر إكمال البحث بسبب مشكلة في المتصفح أو الموقع ({type(exc).__name__})."
+            print(f"Proxy slot #{proxy_index + 1} failed ({type(exc).__name__}), rotating to next...", flush=True)
+            continue
 
+    if last_error:
+        return f"{last_error} جُرّبت البروكسيات المتاحة، حاول مرة أخرى لاحقًا."
     return (
         "تعذر الاتصال عبر جميع البروكسيات المتاحة في القائمة بسبب أعطال اتصال."
     )
@@ -1372,6 +1522,7 @@ async def retry_lookup_callback(call):
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global WEBHOOK_SECRET
+    await _initialize_proxy_storage()
     public_url = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
     if not public_url:
         raise RuntimeError("RENDER_EXTERNAL_URL is required to configure Telegram webhook")
@@ -1409,6 +1560,7 @@ app.include_router(
         test_proxy=_test_proxy_connection,
         password_hash=_PROXY_ADMIN_PASSWORD_HASH,
         password_pepper=lambda: BOT_TOKEN,
+        storage_backend=lambda: "firestore" if _FIRESTORE_PROXY_DOCUMENT is not None else "file",
     )
 )
 
