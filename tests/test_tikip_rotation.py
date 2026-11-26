@@ -3,7 +3,7 @@ import importlib
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 os.environ.setdefault("BOT_TOKEN", "123456:test-token")
@@ -27,6 +27,30 @@ class TikipRotationTests(unittest.IsolatedAsyncioTestCase):
     async def test_duplicate_webhook_update_is_claimed_only_once(self):
         self.assertTrue(bot._claim_webhook_update(123456))
         self.assertFalse(bot._claim_webhook_update(123456))
+
+    async def test_webhook_acknowledges_and_schedules_one_copy(self):
+        class FakeRequest:
+            headers = {"X-Telegram-Bot-Api-Secret-Token": "test-secret"}
+
+            async def json(self):
+                return {"update_id": 789012}
+
+        background_tasks = bot.BackgroundTasks()
+        duplicate_tasks = bot.BackgroundTasks()
+        with patch.object(bot, "WEBHOOK_SECRET", "test-secret"), patch.object(
+            bot.bot, "process_new_updates", new_callable=AsyncMock
+        ) as process_updates:
+            response = await bot.telegram_webhook(FakeRequest(), background_tasks)
+            duplicate_response = await bot.telegram_webhook(
+                FakeRequest(), duplicate_tasks
+            )
+            self.assertEqual(response, {"ok": True})
+            self.assertEqual(duplicate_response, {"ok": True})
+            self.assertEqual(len(background_tasks.tasks), 1)
+            self.assertEqual(len(duplicate_tasks.tasks), 0)
+
+            await background_tasks()
+            process_updates.assert_awaited_once()
 
     async def test_attempt_timeout_rotates_without_waiting_for_background_timeout(self):
         calls = []
